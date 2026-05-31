@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Lead Remote Assist</string>
+    <string name="remote_control_accessibility_description">允许 Web 端在远程协助时执行返回、主页、后台、点击和滑动操作。</string>
+</resources>

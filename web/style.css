@@ -1,0 +1,346 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  overflow: hidden;
+  background: #050608;
+  color: #f7f9fc;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overscroll-behavior: none;
+}
+
+button {
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-shell,
+.stage {
+  position: fixed;
+  inset: 0;
+}
+
+.stage {
+  background: #050608;
+  overflow: hidden;
+}
+
+#screen {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  background: #050608;
+  object-fit: contain;
+  touch-action: none;
+}
+
+#touch-layer {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+#touch-layer::after {
+  display: none;
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  min-width: 96px;
+  padding: 5px 8px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 6px;
+  background: rgb(10 12 16 / 72%);
+  color: #d9e0ea;
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: center;
+  content: attr(data-channel);
+  pointer-events: none;
+}
+
+.status-panel,
+.control-float {
+  position: fixed;
+  z-index: 10;
+  user-select: none;
+  touch-action: none;
+}
+
+.status-panel {
+  left: max(14px, env(safe-area-inset-left));
+  top: max(14px, env(safe-area-inset-top));
+  width: min(200px, calc(100vw - 28px));
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 8px;
+  background: rgb(14 17 22 / 74%);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 34%);
+  backdrop-filter: blur(12px);
+}
+
+.panel-handle {
+  justify-content: space-between;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px 8px 0 0;
+  background: rgb(255 255 255 / 5%);
+  color: #f7f9fc;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: grab;
+}
+
+.panel-handle::after {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  color: #aab4c2;
+  content: "";
+  transform: rotate(45deg) translateY(-2px);
+}
+
+.status-panel.is-collapsed {
+  width: max-content;
+}
+
+.status-panel.is-collapsed .status-body {
+  display: none;
+}
+
+.status-panel.is-collapsed .panel-handle {
+  border-radius: 8px;
+}
+
+.status-panel.is-collapsed .panel-handle::after {
+  display: none;
+}
+
+.status-body {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+
+.status-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  color: #aeb8c7;
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: keep-all;
+}
+
+.status-row strong {
+  min-width: 0;
+  color: #f3f6fa;
+  font-size: 13px;
+  font-weight: 520;
+  overflow-wrap: anywhere;
+}
+
+.detail-row strong {
+  line-height: 1.5;
+}
+
+.control-float {
+  left: max(16px, env(safe-area-inset-left));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: auto minmax(0, 280px);
+  gap: 10px;
+}
+
+.control-float.is-context-menu {
+  z-index: 24;
+  grid-template-columns: minmax(0, 200px);
+  gap: 0;
+}
+
+.control-float.is-context-menu .control-ball {
+  display: none;
+}
+
+.control-ball {
+  height: 38px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 8px;
+  background: rgb(31 38 48 / 78%);
+  box-shadow: 0 12px 26px rgb(0 0 0 / 38%);
+  color: #f7f9fc;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: grab;
+  backdrop-filter: blur(12px);
+  padding: 0 12px;
+}
+
+.control-ball:active,
+.panel-handle:active {
+  cursor: grabbing;
+}
+
+.control-panel {
+  width: min(200px, calc(100vw - 98px));
+  padding: 10px;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 8px;
+  background: rgb(14 17 22 / 76%);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 34%);
+  backdrop-filter: blur(12px);
+}
+
+.control-float.is-collapsed .control-panel {
+  display: none;
+}
+
+.control-float.is-context-menu .control-panel {
+  display: block;
+}
+
+.context-safe-zone {
+  position: fixed;
+  inset: 0;
+  z-index: 23;
+  pointer-events: none;
+}
+
+.control-group {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.control-group[aria-label="输入模式"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.quality-group {
+  margin-bottom: 0;
+}
+
+.remote-action,
+.permission-action,
+.mode-option,
+.quality-option {
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid rgb(255 255 255 / 11%);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 6%);
+  color: #d9e0ea;
+  font-size: 13px;
+  line-height: 1.15;
+  cursor: pointer;
+}
+
+.remote-action.icon-button,
+.permission-action.icon-button,
+.mode-option.icon-button {
+  padding: 0;
+}
+
+.permission-action {
+  width: 100%;
+  margin-bottom: 8px;
+  background: rgb(36 45 58 / 78%);
+}
+
+.remote-action:hover,
+.permission-action:hover,
+.mode-option:hover,
+.quality-option:hover {
+  border-color: rgb(255 255 255 / 23%);
+  color: #ffffff;
+}
+
+.remote-action:active,
+.permission-action:active,
+.mode-option.active,
+.quality-option.active {
+  border-color: rgb(255 255 255 / 58%);
+  background: #eef3f7;
+  color: #11151b;
+}
+
+.permission-action.enabled {
+  border-color: rgb(91 207 139 / 62%);
+  background: rgb(27 82 55 / 78%);
+  color: #c8f7da;
+}
+
+@media (max-width: 520px), (pointer: coarse) {
+  #touch-layer::after {
+    right: max(8px, env(safe-area-inset-right));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    min-width: 82px;
+    font-size: 11px;
+  }
+
+  .status-panel {
+    width: min(286px, calc(100vw - 24px));
+  }
+
+  .control-float {
+    grid-template-columns: 54px minmax(0, 252px);
+    gap: 8px;
+  }
+
+  .control-float.is-context-menu {
+    grid-template-columns: minmax(0, 252px);
+  }
+
+  .control-ball {
+    width: 54px;
+    height: 54px;
+    font-size: 12px;
+  }
+
+  .control-panel {
+    width: min(252px, calc(100vw - 86px));
+  }
+
+  .remote-action,
+  .permission-action,
+  .mode-option,
+  .quality-option {
+    min-height: 38px;
+    padding: 0 6px;
+    font-size: 12px;
+  }
+}

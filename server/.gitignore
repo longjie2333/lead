@@ -1,0 +1,21 @@
+# Build output
+lead-turn-server
+lead-turn-server.exe
+*.test
+*.out
+
+# Runtime data
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Environment
+.env
+.env.*
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
