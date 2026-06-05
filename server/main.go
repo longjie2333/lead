@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/pion/turn/v4"
 )
@@ -25,6 +27,9 @@ type config struct {
 	Password   string
 	MinPort    int
 	MaxPort    int
+	HTTPAddr   string
+	HTTPPort   int
+	SFUURL     string
 }
 
 func main() {
@@ -45,13 +50,55 @@ func main() {
 
 	log.Printf("TURN UDP listening on %s", listenAddress)
 	log.Printf("TURN relay address %s", publicIP.String())
-	log.Printf("Web env: TURN_URL=turn:%s:%d TURN_USERNAME=%s TURN_CREDENTIAL=%s",
-		publicIP.String(), cfg.Port, cfg.Username, cfg.Password)
+
+	httpServer, err := startHTTPServer(cfg, publicIP.String())
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown HTTP server: %v", err)
+		}
+	}()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	<-ctx.Done()
-	log.Print("TURN server stopped")
+	log.Print("server stopped")
+}
+
+func startHTTPServer(cfg config, publicIP string) (*http.Server, error) {
+	if err := validateHTTPConfig(cfg); err != nil {
+		return nil, err
+	}
+
+	iceServers := buildICEServers(cfg, publicIP)
+	hub := newSignalingHub(iceServers, relayMode(cfg), cfg.SFUURL)
+	mux := http.NewServeMux()
+	mux.Handle("/ws", hub)
+	mux.HandleFunc("/viewer", func(writer http.ResponseWriter, request *http.Request) {
+		http.ServeFile(writer, request, "public/index.html")
+	})
+	mux.Handle("/viewer/", http.StripPrefix("/viewer/", http.FileServer(http.Dir("public"))))
+	mux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+		writer.Write([]byte("Hello"))
+	})
+
+	addr := net.JoinHostPort(cfg.HTTPAddr, strconv.Itoa(cfg.HTTPPort))
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		log.Printf("HTTP signaling/static server listening on http://%s", addr)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("HTTP server stopped unexpectedly: %v", err)
+		}
+	}()
+	return server, nil
 }
 
 func startTURNServer(cfg config) (*turn.Server, string, net.IP, error) {
@@ -109,6 +156,9 @@ func loadConfig() (config, error) {
 		Password:   envString("TURN_CREDENTIAL", "leadpass"),
 		MinPort:    envInt("TURN_MIN_PORT", 0),
 		MaxPort:    envInt("TURN_MAX_PORT", 0),
+		HTTPAddr:   envString("HTTP_ADDR", "0.0.0.0"),
+		HTTPPort:   envInt("PORT", 8787),
+		SFUURL:     envString("SFU_URL", ""),
 	}
 
 	flag.StringVar(&cfg.ListenAddr, "listen", cfg.ListenAddr, "UDP listen address")
@@ -119,9 +169,15 @@ func loadConfig() (config, error) {
 	flag.StringVar(&cfg.Password, "password", cfg.Password, "TURN credential")
 	flag.IntVar(&cfg.MinPort, "min-port", cfg.MinPort, "Minimum relay port, 0 disables range")
 	flag.IntVar(&cfg.MaxPort, "max-port", cfg.MaxPort, "Maximum relay port, 0 disables range")
+	flag.StringVar(&cfg.HTTPAddr, "http-listen", cfg.HTTPAddr, "HTTP listen address for static web and signaling")
+	flag.IntVar(&cfg.HTTPPort, "http-port", cfg.HTTPPort, "HTTP listen port for static web and signaling")
+	flag.StringVar(&cfg.SFUURL, "sfu-url", cfg.SFUURL, "Optional SFU endpoint advertised to clients")
 	flag.Parse()
 
 	if err := validateConfig(&cfg); err != nil {
+		return cfg, err
+	}
+	if err := validateHTTPConfig(cfg); err != nil {
 		return cfg, err
 	}
 	return cfg, nil
@@ -151,6 +207,36 @@ func validateConfig(cfg *config) error {
 		return errors.New("TURN relay port range must be within 0..65535")
 	}
 	return nil
+}
+
+func validateHTTPConfig(cfg config) error {
+	if cfg.HTTPPort <= 0 || cfg.HTTPPort > 65535 {
+		return fmt.Errorf("invalid HTTP port %d", cfg.HTTPPort)
+	}
+	return nil
+}
+
+func buildICEServers(cfg config, publicIP string) []iceServer {
+	if servers, ok := parseICEServersJSON(os.Getenv("ICE_SERVERS_JSON")); ok {
+		return servers
+	}
+	servers := []iceServer{{URLs: "stun:stun.l.google.com:19302"}}
+	turnURL := envString("TURN_URL", fmt.Sprintf("turn:%s:%d", publicIP, cfg.Port))
+	if turnURL != "" {
+		servers = append(servers, iceServer{
+			URLs:       turnURL,
+			Username:   cfg.Username,
+			Credential: cfg.Password,
+		})
+	}
+	return servers
+}
+
+func relayMode(cfg config) string {
+	if cfg.SFUURL != "" {
+		return "sfu"
+	}
+	return "turn"
 }
 
 func relayAddressGenerator(cfg config, publicIP net.IP) turn.RelayAddressGenerator {
