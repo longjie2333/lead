@@ -66,6 +66,7 @@ class ScreenShareService : Service() {
     private var screenCapturer: ScreenCapturerAndroid? = null
     private var captureWidth = 720
     private var captureHeight = 1280
+    private var auth: ServerAuth? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -159,15 +160,29 @@ class ScreenShareService : Service() {
     }
 
     private fun connectSignaling() {
+        val saved = AuthStore.load(this)
+        if (saved == null) {
+            Log.e(TAG, "Not logged in; cannot connect signaling")
+            stopSelf()
+            return
+        }
+        val session = ServerAuth(token = saved.token, deviceId = saved.deviceId)
+        auth = session
+        openSignaling(saved.serverUrl, session)
+    }
+
+    private fun openSignaling(serverUrl: String, session: ServerAuth) {
+        val wsUrl = AuthClient.authenticatedWebSocketUrl(serverUrl, session)
         webSocket = client.newWebSocket(
-            Request.Builder().url(BuildConfig.SCREEN_SHARE_SERVER_URL).build(),
+            Request.Builder().url(wsUrl).build(),
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    Log.i(TAG, "Signaling connected to ${BuildConfig.SCREEN_SHARE_SERVER_URL}")
+                    Log.i(TAG, "Signaling connected to $wsUrl")
                     sendJson(
                         JSONObject()
                             .put("type", "hello")
                             .put("role", "android")
+                            .put("deviceId", session.deviceId)
                             .put("width", captureWidth)
                             .put("height", captureHeight)
                             .put("controlEnabled", isRemoteControlEnabled()),

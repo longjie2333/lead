@@ -1,4 +1,4 @@
-const statusEl = document.querySelector("#status");
+﻿const statusEl = document.querySelector("#status");
 const latencyEl = document.querySelector("#latency");
 const routeModeEl = document.querySelector("#route-mode");
 const routeDetailEl = document.querySelector("#route-detail");
@@ -14,6 +14,21 @@ const statusHandleEl = document.querySelector("#status-handle");
 const controlFloatEl = document.querySelector("#control-float");
 const controlBallEl = document.querySelector("#control-float-button");
 const controlPanelEl = document.querySelector("#control-panel");
+const loginPanelEl = document.querySelector("#login-panel");
+const loginFormEl = document.querySelector("#login-form");
+const loginUsernameEl = document.querySelector("#login-username");
+const loginPasswordEl = document.querySelector("#login-password");
+const loginErrorEl = document.querySelector("#login-error");
+const authAlertEl = document.querySelector("#auth-alert");
+const authAlertMessageEl = document.querySelector("#auth-alert-message");
+const authParamFormEl = document.querySelector("#auth-param-form");
+const authParamTokenEl = document.querySelector("#auth-param-token");
+const authParamDeviceIdEl = document.querySelector("#auth-param-device-id");
+const devicePanelEl = document.querySelector("#device-panel");
+const deviceListEl = document.querySelector("#device-list");
+const deviceSummaryEl = document.querySelector("#device-summary");
+const refreshDevicesButtonEl = document.querySelector("#refresh-devices-button");
+const logoutButtonEl = document.querySelector("#logout-button");
 const contextSafeZoneEl = document.createElement("div");
 
 const qualityLabels = {
@@ -35,6 +50,9 @@ let statsTimer;
 let usingRelayOnly = false;
 let selectedQuality = localStorage.getItem("lead-quality-mode") || "balanced";
 let inputMode = localStorage.getItem("lead-input-mode") || "direct";
+const queryParams = new URLSearchParams(location.search);
+let authToken = queryParams.get("token") || "";
+let selectedDeviceId = queryParams.get("deviceId") || "";
 const activePointers = new Map();
 let gesturePointers = new Map();
 let longPressTimer;
@@ -70,8 +88,13 @@ setupFloatingPanel({
   },
 });
 setupControlContextMenu();
-connectSignaling();
+initAuth();
 renderControlChannel();
+
+loginFormEl.addEventListener("submit", handleLogin);
+authParamFormEl.addEventListener("submit", handleAuthParamSubmit);
+refreshDevicesButtonEl.addEventListener("click", refreshDevices);
+logoutButtonEl.addEventListener("click", handleLogout);
 
 for (const button of qualityButtons) {
   button.addEventListener("click", () => {
@@ -91,6 +114,10 @@ for (const button of permissionButtons) {
   button.addEventListener("click", requestControlPermission);
 }
 
+for (const eventName of ["pointerdown", "pointermove", "pointerup", "pointercancel", "click", "dblclick", "contextmenu", "wheel", "touchstart", "touchmove", "touchend"]) {
+  authAlertEl.addEventListener(eventName, stopAuthAlertEvent, { passive: false });
+}
+
 touchLayerEl.addEventListener("pointerdown", handlePointerDown);
 touchLayerEl.addEventListener("pointermove", handlePointerMove);
 touchLayerEl.addEventListener("pointerup", handlePointerUp);
@@ -103,6 +130,195 @@ window.addEventListener("keydown", (event) => {
   if (event.ctrlKey && event.key.toLowerCase() === "h") sendControl({ action: "home" });
   if (event.ctrlKey && event.key.toLowerCase() === "r") sendControl({ action: "recents" });
 });
+
+async function initAuth() {
+  if (!authToken || !selectedDeviceId) {
+    showMissingParamsAlert();
+    return;
+  }
+  try {
+    const devices = await fetchDevices();
+    const exists = devices.some((device) => device.id === selectedDeviceId);
+    if (!exists) {
+      showAuthAlert("未授权访问该设备，或设备不属于当前 token 对应的账号。");
+      return;
+    }
+    hideAuthPanels();
+    connectSignaling();
+  } catch {
+    showAuthAlert("未授权或 token 已失效，请重新生成带 token 和 deviceId 的访问链接。");
+  }
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  loginErrorEl.textContent = "";
+  const payload = {
+    username: loginUsernameEl.value.trim(),
+    password: loginPasswordEl.value,
+    source: "viewer",
+  };
+  try {
+    const response = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error("login failed");
+    const data = await response.json();
+    authToken = data.token;
+    if (selectedDeviceId && (data.devices || []).some((device) => device.id === selectedDeviceId)) {
+      hideAuthPanels();
+      connectSignaling();
+      return;
+    }
+    renderDevices(data.devices || []);
+  } catch {
+    showLogin("账号或密码错误");
+  }
+}
+
+function showAuthAlert(message) {
+  cleanupPeer();
+  loginPanelEl.hidden = true;
+  devicePanelEl.hidden = true;
+  authParamFormEl.hidden = true;
+  authAlertMessageEl.textContent = message;
+  authAlertEl.hidden = false;
+  statusEl.textContent = "未授权";
+}
+
+function showMissingParamsAlert() {
+  cleanupPeer();
+  loginPanelEl.hidden = true;
+  devicePanelEl.hidden = true;
+  authAlertMessageEl.textContent = "请提供以下必要的参数：";
+  authParamTokenEl.value = authToken;
+  authParamDeviceIdEl.value = selectedDeviceId;
+  authParamFormEl.hidden = false;
+  authAlertEl.hidden = false;
+  statusEl.textContent = "缺少参数";
+}
+
+function handleAuthParamSubmit(event) {
+  event.preventDefault();
+  const token = authParamTokenEl.value.trim();
+  const deviceId = authParamDeviceIdEl.value.trim();
+  if (!token || !deviceId) {
+    authAlertMessageEl.textContent = "请提供以下必要的参数：";
+    authParamTokenEl.toggleAttribute("aria-invalid", !token);
+    authParamDeviceIdEl.toggleAttribute("aria-invalid", !deviceId);
+    if (!token) authParamTokenEl.focus();
+    else authParamDeviceIdEl.focus();
+    return;
+  }
+  const params = new URLSearchParams({ token, deviceId });
+  location.assign(`/viewer?${params}`);
+}
+
+function stopAuthAlertEvent(event) {
+  if (authAlertEl.hidden) return;
+  if (!event.target.closest(".auth-alert-box")) event.preventDefault();
+  event.stopPropagation();
+}
+
+async function refreshDevices() {
+  if (!authToken) {
+    showLogin();
+    return;
+  }
+  refreshDevicesButtonEl.disabled = true;
+  deviceSummaryEl.textContent = "正在刷新";
+  try {
+    renderDevices(await fetchDevices());
+  } catch {
+    showLogin("无法获取设备列表，请重新登录");
+  } finally {
+    refreshDevicesButtonEl.disabled = false;
+  }
+}
+
+async function handleLogout() {
+  if (authToken) {
+    await fetch("/api/logout", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${authToken}` },
+    }).catch(() => {});
+  }
+  cleanupPeer();
+  socket?.close(1000, "logout");
+  socket = undefined;
+  authToken = "";
+  selectedDeviceId = "";
+  history.replaceState(null, "", "/viewer");
+  showLogin();
+}
+
+async function fetchDevices() {
+  const response = await fetch("/api/devices", {
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  if (!response.ok) throw new Error("fetch devices failed");
+  const data = await response.json();
+  return data.devices || [];
+}
+
+function renderDevices(devices) {
+  loginPanelEl.hidden = true;
+  devicePanelEl.hidden = false;
+  deviceListEl.innerHTML = "";
+  const onlineCount = devices.filter((device) => device.online).length;
+  deviceSummaryEl.textContent = `${devices.length} 台设备，${onlineCount} 台在线`;
+  if (devices.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "device-empty";
+    empty.innerHTML = "<strong>暂无设备</strong><span>请先在安卓被控端启动应用并登录。</span>";
+    deviceListEl.append(empty);
+    return;
+  }
+  for (const device of devices) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "device-item";
+    button.classList.toggle("online", Boolean(device.online));
+    button.innerHTML = `
+      <span>
+        <strong>${escapeHTML(device.name || device.id)}</strong>
+        <small>${escapeHTML(device.id)}</small>
+      </span>
+      <em>${device.online ? "在线" : "离线"}</em>
+    `;
+    button.addEventListener("click", () => {
+      selectedDeviceId = device.id;
+      const params = new URLSearchParams({ token: authToken, deviceId: selectedDeviceId });
+      history.replaceState(null, "", `/viewer?${params}`);
+      hideAuthPanels();
+      connectSignaling();
+    });
+    deviceListEl.append(button);
+  }
+}
+
+function showLogin(message = "") {
+  loginPanelEl.hidden = false;
+  devicePanelEl.hidden = true;
+  loginErrorEl.textContent = message;
+}
+
+function hideAuthPanels() {
+  loginPanelEl.hidden = true;
+  devicePanelEl.hidden = true;
+  authAlertEl.hidden = true;
+}
+
+function escapeHTML(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
 function handlePointerDown(event) {
   if (event.button !== undefined && event.button !== 0) return;
@@ -382,11 +598,16 @@ function finishGesture() {
 }
 
 function connectSignaling() {
-  socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+  if (!authToken || !selectedDeviceId) {
+    initAuth();
+    return;
+  }
+  const params = new URLSearchParams({ token: authToken, deviceId: selectedDeviceId });
+  socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?${params}`);
 
   socket.addEventListener("open", () => {
     statusEl.textContent = "已连接信令服务器";
-    socket.send(JSON.stringify({ type: "hello", role: "viewer", qualityMode: selectedQuality }));
+    socket.send(JSON.stringify({ type: "hello", role: "viewer", deviceId: selectedDeviceId, qualityMode: selectedQuality }));
     sendQualityMode();
   });
 
@@ -397,6 +618,7 @@ function connectSignaling() {
 
   socket.addEventListener("close", () => {
     cleanupPeer();
+    if (!authToken || !selectedDeviceId) return;
     statusEl.textContent = "信令已断开，正在重连";
     latencyEl.textContent = "RTT -- ms";
     routeModeEl.textContent = "--";
@@ -411,6 +633,15 @@ async function handleSignal(data) {
   if (data.iceServers) iceServers = data.iceServers;
   if (data.relayMode) relayMode = data.relayMode;
   if (data.sfuUrl) sfuUrl = data.sfuUrl;
+
+  if (data.type === "error") {
+    cleanupPeer();
+    statusEl.textContent = data.message || "连接失败";
+    selectedDeviceId = "";
+    history.replaceState(null, "", "/viewer");
+    renderDevices(await fetchDevices().catch(() => []));
+    return;
+  }
 
   if (data.type === "waiting") {
     statusEl.textContent = "等待安卓端连接";
@@ -811,3 +1042,5 @@ function persistPanelState(panel, storageKey, collapsedClass) {
     position: { left: Math.round(rect.left), top: Math.round(rect.top) },
   }));
 }
+
+

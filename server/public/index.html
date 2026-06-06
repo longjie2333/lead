@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>远程协助</title>
+    <title>Lead Remote Assist</title>
     <link rel="stylesheet" href="/viewer/style.css" />
   </head>
   <body>
@@ -17,7 +17,45 @@
       <symbol id="icon-touch" viewBox="0 0 24 24"><path d="M8 11V6a2 2 0 1 1 4 0v5" /><path d="M12 10V8a2 2 0 1 1 4 0v6" /><path d="M8 11a2 2 0 0 0-4 0v2c0 5 3 8 8 8h1a5 5 0 0 0 5-5v-2" /></symbol>
       <symbol id="icon-trackpad" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3" /><path d="M4 14h16" /><path d="M12 14v5" /></symbol>
     </svg>
+
     <main class="app-shell">
+      <section id="auth-alert" class="auth-alert" hidden role="alertdialog" aria-modal="true" aria-labelledby="auth-alert-title">
+        <div class="auth-alert-box">
+          <h1 id="auth-alert-title">无法连接设备</h1>
+          <p id="auth-alert-message">缺少必要授权参数。</p>
+          <form id="auth-param-form" class="auth-param-form" hidden>
+            <input id="auth-param-token" name="token" autocomplete="off" placeholder="token" />
+            <input id="auth-param-device-id" name="deviceId" autocomplete="off" placeholder="deviceId" />
+            <button type="submit">连接</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="login-panel" class="login-panel" aria-label="登录">
+        <form id="login-form" class="login-form">
+          <h1>Lead Remote Assist</h1>
+          <p>登录后选择要控制的安卓设备。</p>
+          <input id="login-username" name="username" autocomplete="username" placeholder="账号" value="admin" />
+          <input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="密码" value="admin" />
+          <button type="submit">登录</button>
+          <p id="login-error" role="status"></p>
+        </form>
+      </section>
+
+      <section id="device-panel" class="device-panel" hidden aria-label="设备列表">
+        <div class="device-list-head">
+          <div>
+            <strong>选择设备</strong>
+            <span id="device-summary">--</span>
+          </div>
+          <div class="device-actions">
+            <button id="refresh-devices-button" type="button">刷新</button>
+            <button id="logout-button" type="button">退出</button>
+          </div>
+        </div>
+        <div id="device-list" class="device-list"></div>
+      </section>
+
       <section class="stage" aria-label="远程屏幕">
         <video id="screen" autoplay playsinline muted></video>
         <div id="touch-layer" aria-hidden="true"></div>
@@ -28,11 +66,11 @@
           <svg class="icon" aria-hidden="true"><use href="#icon-status"></use></svg>
         </button>
         <div class="status-body">
-          <div class="status-row"><span aria-label="状态">状态：</span><strong id="status">等待安卓端连接</strong></div>
-          <div class="status-row"><span aria-label="输入">输入：</span><strong id="control-status">--</strong></div>
-          <div class="status-row"><span aria-label="延时">延时：</span><strong id="latency">RTT -- ms</strong></div>
-          <div class="status-row"><span aria-label="线路">线路：</span><strong id="route-mode">--</strong></div>
-          <div class="status-row detail-row"><span aria-label="候选">候选：</span><strong id="route-detail">--</strong></div>
+          <div class="status-row"><span>状态：</span><strong id="status">等待选择设备</strong></div>
+          <div class="status-row"><span>输入：</span><strong id="control-status">--</strong></div>
+          <div class="status-row"><span>延时：</span><strong id="latency">RTT -- ms</strong></div>
+          <div class="status-row"><span>线路：</span><strong id="route-mode">--</strong></div>
+          <div class="status-row detail-row"><span>候选：</span><strong id="route-detail">--</strong></div>
         </div>
       </section>
 

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -107,12 +110,121 @@ func TestLoadConfigRejectsInvalidRelayRange(t *testing.T) {
 	}
 }
 
+func TestAuthLoginBindsAndroidDeviceAndListsDevices(t *testing.T) {
+	t.Setenv("AUTH_DB_PATH", filepath.Join(t.TempDir(), "auth.db"))
+	auth := newAuthService()
+	defer auth.close()
+	hub := newSignalingHub(nil, "turn", "", auth)
+	server := httptest.NewServer(auth.routes(hub))
+	defer server.Close()
+
+	androidLogin := postJSON(t, server.URL+"/api/login", map[string]any{
+		"username":   "admin",
+		"password":   "admin",
+		"source":     "android",
+		"deviceId":   "device-1",
+		"deviceName": "Pixel Test",
+	}, "")
+	if androidLogin["token"] == "" {
+		t.Fatalf("android login should return a token: %#v", androidLogin)
+	}
+	device, ok := androidLogin["device"].(map[string]any)
+	if !ok || device["id"] != "device-1" || device["name"] != "Pixel Test" {
+		t.Fatalf("android login should bind device: %#v", androidLogin["device"])
+	}
+	postJSON(t, server.URL+"/api/login", map[string]any{
+		"username":   "admin",
+		"password":   "admin",
+		"source":     "android",
+		"deviceId":   "device-2",
+		"deviceName": "Tablet Test",
+	}, "")
+
+	viewerLogin := postJSON(t, server.URL+"/api/login", map[string]any{
+		"username": "admin",
+		"password": "admin",
+		"source":   "viewer",
+	}, "")
+	devices, ok := viewerLogin["devices"].([]any)
+	if !ok || len(devices) != 2 {
+		t.Fatalf("viewer login devices = %#v", viewerLogin["devices"])
+	}
+
+	token, _ := viewerLogin["token"].(string)
+	devicesResp := getJSON(t, server.URL+"/api/devices", token)
+	list, ok := devicesResp["devices"].([]any)
+	if !ok || len(list) != 2 {
+		t.Fatalf("devices response = %#v", devicesResp)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/api/logout", nil)
+	if err != nil {
+		t.Fatalf("new logout request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("logout request: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("logout status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+	devicesStatus := getStatus(t, server.URL+"/api/devices", token)
+	if devicesStatus != http.StatusUnauthorized {
+		t.Fatalf("devices after logout status = %d, want %d", devicesStatus, http.StatusUnauthorized)
+	}
+}
+
+func TestAuthStorePersistsTokenAndDevices(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "auth.db")
+	t.Setenv("AUTH_DB_PATH", storePath)
+
+	auth := newAuthService()
+	defer auth.close()
+	hub := newSignalingHub(nil, "turn", "", auth)
+	server := httptest.NewServer(auth.routes(hub))
+
+	login := postJSON(t, server.URL+"/api/login", map[string]any{
+		"username":   "admin",
+		"password":   "admin",
+		"source":     "android",
+		"deviceId":   "device-1",
+		"deviceName": "Pixel Test",
+	}, "")
+	token, _ := login["token"].(string)
+	server.Close()
+
+	reloaded := newAuthService()
+	defer reloaded.close()
+	reloadedHub := newSignalingHub(nil, "turn", "", reloaded)
+	reloadedServer := httptest.NewServer(reloaded.routes(reloadedHub))
+	defer reloadedServer.Close()
+
+	devices := getJSON(t, reloadedServer.URL+"/api/devices", token)
+	list, ok := devices["devices"].([]any)
+	if !ok || len(list) != 1 {
+		t.Fatalf("reloaded devices = %#v", devices)
+	}
+	record := list[0].(map[string]any)
+	if record["id"] != "device-1" || record["online"] != false {
+		t.Fatalf("reloaded device = %#v", record)
+	}
+}
+
 func TestSignalingHubRelaysViewerAndAndroidMessages(t *testing.T) {
-	hub := newSignalingHub([]iceServer{{URLs: "stun:test.example:19302"}}, "turn", "")
+	t.Setenv("AUTH_DB_PATH", filepath.Join(t.TempDir(), "auth.db"))
+	auth := newAuthService()
+	defer auth.close()
+	auth.mu.Lock()
+	auth.tokens["test-token"] = "admin"
+	auth.devices["device-1"] = deviceRecord{ID: "device-1", AccountID: "admin", Name: "Test Device"}
+	auth.mu.Unlock()
+	hub := newSignalingHub([]iceServer{{URLs: "stun:test.example:19302"}}, "turn", "", auth)
 	server := httptest.NewServer(hub)
 	defer server.Close()
 
-	wsURL := "ws" + server.URL[len("http"):]
+	wsURL := "ws" + server.URL[len("http"):] + "?token=test-token&deviceId=device-1"
 	android := dialTestWebSocket(t, wsURL)
 	defer android.Close()
 	viewer := dialTestWebSocket(t, wsURL)
@@ -128,10 +240,11 @@ func TestSignalingHubRelaysViewerAndAndroidMessages(t *testing.T) {
 	}
 
 	writeJSON(t, android, map[string]any{
-		"type":   "hello",
-		"role":   "android",
-		"width":  float64(1080),
-		"height": float64(2400),
+		"type":     "hello",
+		"role":     "android",
+		"deviceId": "device-1",
+		"width":    float64(1080),
+		"height":   float64(2400),
 	})
 	config := readJSON(t, android)
 	if config["type"] != "config" {
@@ -150,6 +263,24 @@ func TestSignalingHubRelaysViewerAndAndroidMessages(t *testing.T) {
 	control := readJSON(t, android)
 	if control["type"] != "control" || control["viewerId"] == "" {
 		t.Fatalf("android control message = %#v", control)
+	}
+}
+
+func TestSignalingHubRejectsUnauthorizedWebSocket(t *testing.T) {
+	t.Setenv("AUTH_DB_PATH", filepath.Join(t.TempDir(), "auth.db"))
+	auth := newAuthService()
+	defer auth.close()
+	hub := newSignalingHub(nil, "turn", "", auth)
+	server := httptest.NewServer(hub)
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[len("http"):]
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatal("anonymous websocket dial should fail")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous websocket status = %#v, want %d", resp, http.StatusUnauthorized)
 	}
 }
 
@@ -186,4 +317,74 @@ func readJSON(t *testing.T, conn *websocket.Conn) map[string]any {
 		t.Fatalf("decode websocket JSON: %v", err)
 	}
 	return data
+}
+
+func postJSON(t *testing.T, rawURL string, body map[string]any, token string) map[string]any {
+	t.Helper()
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal json: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, rawURL, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post json: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	var data map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	return data
+}
+
+func getJSON(t *testing.T, rawURL string, token string) map[string]any {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get json: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	var data map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	return data
+}
+
+func getStatus(t *testing.T, rawURL string, token string) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get status: %v", err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode
 }

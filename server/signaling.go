@@ -22,41 +22,59 @@ type signalingHub struct {
 	upgrader websocket.Upgrader
 	nextID   atomic.Uint64
 
-	mu                    sync.Mutex
-	iceServers            []iceServer
-	mode                  string
-	sfuURL                string
-	androidClients        map[*signalClient]struct{}
+	mu         sync.Mutex
+	auth       *authService
+	iceServers []iceServer
+	mode       string
+	sfuURL     string
+	devices    map[string]*deviceSession
+}
+
+type deviceSession struct {
+	accountID             string
+	deviceID              string
+	activeAndroid         *signalClient
 	waitingAndroidClients map[*signalClient]struct{}
 	viewers               map[string]*signalClient
-	activeAndroid         *signalClient
 	streamInfo            map[string]any
 }
 
 type signalClient struct {
-	id   string
-	role string
-	conn *websocket.Conn
-	mu   sync.Mutex
+	id        string
+	role      string
+	accountID string
+	deviceID  string
+	conn      *websocket.Conn
+	mu        sync.Mutex
 }
 
-func newSignalingHub(iceServers []iceServer, mode string, sfuURL string) *signalingHub {
+func newSignalingHub(iceServers []iceServer, mode string, sfuURL string, auth *authService) *signalingHub {
 	return &signalingHub{
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
-		iceServers:            iceServers,
-		mode:                  mode,
-		sfuURL:                sfuURL,
-		androidClients:        make(map[*signalClient]struct{}),
-		waitingAndroidClients: make(map[*signalClient]struct{}),
-		viewers:               make(map[string]*signalClient),
+		auth:       auth,
+		iceServers: iceServers,
+		mode:       mode,
+		sfuURL:     sfuURL,
+		devices:    make(map[string]*deviceSession),
 	}
 }
 
 func (h *signalingHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	token := bearerToken(r)
+	accountID, ok := h.auth.accountForToken(token)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	deviceID := r.URL.Query().Get("deviceId")
+	if deviceID != "" && !h.auth.deviceBelongsTo(accountID, deviceID) {
+		http.Error(w, "device not found", http.StatusForbidden)
 		return
 	}
 	conn, err := h.upgrader.Upgrade(w, r, nil)
@@ -66,9 +84,11 @@ func (h *signalingHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := &signalClient{
-		id:   fmt.Sprintf("viewer-%d", h.nextID.Add(1)),
-		role: "unknown",
-		conn: conn,
+		id:        fmt.Sprintf("viewer-%d", h.nextID.Add(1)),
+		role:      "unknown",
+		accountID: accountID,
+		deviceID:  deviceID,
+		conn:      conn,
 	}
 	defer h.removeClient(client)
 	defer conn.Close()
@@ -93,60 +113,43 @@ func (h *signalingHub) handleControl(client *signalClient, payload []byte) {
 
 	msgType, _ := data["type"].(string)
 	role, _ := data["role"].(string)
+	if incomingDeviceID, _ := data["deviceId"].(string); client.deviceID == "" && incomingDeviceID != "" {
+		client.deviceID = incomingDeviceID
+	}
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if msgType == "hello" && role == "android" {
-		client.role = "android"
-		h.androidClients[client] = struct{}{}
-		delete(h.waitingAndroidClients, client)
-		h.activeAndroid = client
-		h.streamInfo = cloneMap(data)
-		h.streamInfo["type"] = "stream-info"
-		client.send(h.withServerConfig(map[string]any{"type": "config"}))
-		h.broadcastToViewers(h.withServerConfig(cloneMap(h.streamInfo)))
-		for _, viewer := range h.viewers {
-			h.sendToAndroidLocked(map[string]any{"type": "viewer-joined", "viewerId": viewer.id})
+	if msgType == "hello" {
+		switch role {
+		case "android":
+			h.registerAndroidLocked(client, data)
+		case "android-waiting":
+			h.registerWaitingAndroidLocked(client)
+		case "viewer":
+			h.registerViewerLocked(client)
 		}
 		return
 	}
 
-	if msgType == "hello" && role == "android-waiting" {
-		client.role = "android-waiting"
-		h.waitingAndroidClients[client] = struct{}{}
-		client.send(h.withServerConfig(map[string]any{"type": "config"}))
-		if h.activeAndroid == nil && len(h.viewers) > 0 {
-			client.send(map[string]any{"type": "remote-request"})
-		}
-		return
-	}
-
-	if msgType == "hello" && role == "viewer" {
-		client.role = "viewer"
-		h.viewers[client.id] = client
-		if h.activeAndroid != nil {
-			client.send(h.withServerConfig(cloneMap(h.streamInfo)))
-			h.sendToAndroidLocked(map[string]any{"type": "viewer-joined", "viewerId": client.id})
-		} else {
-			client.send(h.withServerConfig(map[string]any{"type": "waiting"}))
-			h.notifyWaitingAndroidLocked()
-		}
+	session := h.devices[client.deviceID]
+	if session == nil {
+		client.send(h.withServerConfig(map[string]any{"type": "waiting"}))
 		return
 	}
 
 	switch client.role {
 	case "android":
 		if msgType == "stream-info" {
-			h.streamInfo = mergeMap(h.streamInfo, data)
-			h.broadcastToViewers(h.withServerConfig(cloneMap(data)))
+			session.streamInfo = mergeMap(session.streamInfo, data)
+			h.broadcastToViewers(session, h.withServerConfig(cloneMap(data)))
 			return
 		}
 		viewerID, _ := data["viewerId"].(string)
 		if viewerID == "" {
 			return
 		}
-		if viewer := h.viewers[viewerID]; viewer != nil {
+		if viewer := session.viewers[viewerID]; viewer != nil {
 			viewer.send(data)
 		}
 	case "viewer":
@@ -160,48 +163,116 @@ func (h *signalingHub) handleControl(client *signalClient, payload []byte) {
 		}
 		next := cloneMap(data)
 		next["viewerId"] = client.id
-		h.sendToAndroidLocked(next)
+		next["deviceId"] = client.deviceID
+		h.sendToAndroidLocked(session, next)
 	}
+}
+
+func (h *signalingHub) registerAndroidLocked(client *signalClient, data map[string]any) {
+	if client.deviceID == "" || !h.auth.deviceBelongsTo(client.accountID, client.deviceID) {
+		client.send(map[string]any{"type": "error", "message": "deviceId is required"})
+		return
+	}
+	session := h.sessionLocked(client.accountID, client.deviceID)
+	client.role = "android"
+	session.activeAndroid = client
+	session.streamInfo = cloneMap(data)
+	session.streamInfo["type"] = "stream-info"
+	h.auth.setDeviceOnline(client.accountID, client.deviceID, true)
+	client.send(h.withServerConfig(map[string]any{"type": "config"}))
+	h.broadcastToViewers(session, h.withServerConfig(cloneMap(session.streamInfo)))
+	for _, viewer := range session.viewers {
+		h.sendToAndroidLocked(session, map[string]any{"type": "viewer-joined", "viewerId": viewer.id, "deviceId": client.deviceID})
+	}
+}
+
+func (h *signalingHub) registerWaitingAndroidLocked(client *signalClient) {
+	if client.deviceID == "" || !h.auth.deviceBelongsTo(client.accountID, client.deviceID) {
+		client.send(map[string]any{"type": "error", "message": "deviceId is required"})
+		return
+	}
+	session := h.sessionLocked(client.accountID, client.deviceID)
+	client.role = "android-waiting"
+	session.waitingAndroidClients[client] = struct{}{}
+	h.auth.setDeviceOnline(client.accountID, client.deviceID, false)
+	client.send(h.withServerConfig(map[string]any{"type": "config"}))
+	if session.activeAndroid == nil && len(session.viewers) > 0 {
+		client.send(map[string]any{"type": "remote-request", "deviceId": client.deviceID})
+	}
+}
+
+func (h *signalingHub) registerViewerLocked(client *signalClient) {
+	if client.deviceID == "" || !h.auth.deviceBelongsTo(client.accountID, client.deviceID) {
+		client.send(map[string]any{"type": "error", "message": "viewer deviceId is required"})
+		return
+	}
+	session := h.sessionLocked(client.accountID, client.deviceID)
+	client.role = "viewer"
+	session.viewers[client.id] = client
+	if session.activeAndroid != nil {
+		client.send(h.withServerConfig(cloneMap(session.streamInfo)))
+		h.sendToAndroidLocked(session, map[string]any{"type": "viewer-joined", "viewerId": client.id, "deviceId": client.deviceID})
+		return
+	}
+	client.send(h.withServerConfig(map[string]any{"type": "waiting"}))
+	h.notifyWaitingAndroidLocked(session)
 }
 
 func (h *signalingHub) removeClient(client *signalClient) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	session := h.devices[client.deviceID]
+	if session == nil {
+		return
+	}
 	switch client.role {
 	case "android":
-		delete(h.androidClients, client)
-		if h.activeAndroid == client {
-			h.activeAndroid = nil
-			for candidate := range h.androidClients {
-				h.activeAndroid = candidate
-				break
-			}
-			h.streamInfo = nil
-			h.broadcastToViewers(map[string]any{"type": "android-disconnected"})
+		if session.activeAndroid == client {
+			session.activeAndroid = nil
+			session.streamInfo = nil
+			h.auth.setDeviceOnline(client.accountID, client.deviceID, false)
+			h.broadcastToViewers(session, map[string]any{"type": "android-disconnected", "deviceId": client.deviceID})
 		}
 	case "android-waiting":
-		delete(h.waitingAndroidClients, client)
+		delete(session.waitingAndroidClients, client)
 	case "viewer":
-		delete(h.viewers, client.id)
-		h.sendToAndroidLocked(map[string]any{"type": "viewer-left", "viewerId": client.id})
+		delete(session.viewers, client.id)
+		h.sendToAndroidLocked(session, map[string]any{"type": "viewer-left", "viewerId": client.id, "deviceId": client.deviceID})
+	}
+	if session.activeAndroid == nil && len(session.waitingAndroidClients) == 0 && len(session.viewers) == 0 {
+		delete(h.devices, client.deviceID)
 	}
 }
 
-func (h *signalingHub) sendToAndroidLocked(data map[string]any) {
-	if h.activeAndroid != nil {
-		h.activeAndroid.send(data)
+func (h *signalingHub) sessionLocked(accountID, deviceID string) *deviceSession {
+	session := h.devices[deviceID]
+	if session == nil {
+		session = &deviceSession{
+			accountID:             accountID,
+			deviceID:              deviceID,
+			waitingAndroidClients: make(map[*signalClient]struct{}),
+			viewers:               make(map[string]*signalClient),
+		}
+		h.devices[deviceID] = session
+	}
+	return session
+}
+
+func (h *signalingHub) sendToAndroidLocked(session *deviceSession, data map[string]any) {
+	if session.activeAndroid != nil {
+		session.activeAndroid.send(data)
 	}
 }
 
-func (h *signalingHub) notifyWaitingAndroidLocked() {
-	for client := range h.waitingAndroidClients {
-		client.send(map[string]any{"type": "remote-request"})
+func (h *signalingHub) notifyWaitingAndroidLocked(session *deviceSession) {
+	for client := range session.waitingAndroidClients {
+		client.send(map[string]any{"type": "remote-request", "deviceId": session.deviceID})
 	}
 }
 
-func (h *signalingHub) broadcastToViewers(data map[string]any) {
-	for _, viewer := range h.viewers {
+func (h *signalingHub) broadcastToViewers(session *deviceSession, data map[string]any) {
+	for _, viewer := range session.viewers {
 		viewer.send(data)
 	}
 }

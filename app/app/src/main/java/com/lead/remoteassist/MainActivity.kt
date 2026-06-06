@@ -18,12 +18,19 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,24 +41,46 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
+import okhttp3.OkHttpClient
 import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.extra.WindowDialog
+import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
+    private val authClient = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .build()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        startPermissionRequestService()
+        if (AuthStore.load(this) != null) startPermissionRequestService()
         val projectionManager = getSystemService(MediaProjectionManager::class.java)
 
         setContent {
+            var savedAuth by remember { mutableStateOf(AuthStore.load(this)) }
+            var username by remember { mutableStateOf(AuthStore.username(this).ifBlank { "admin" }) }
+            var password by remember { mutableStateOf("") }
+            var dialogMessage by remember { mutableStateOf("") }
+            var isLoggingIn by remember { mutableStateOf(false) }
             var projectionGranted by remember { mutableStateOf(false) }
             var controlEnabled by remember { mutableStateOf(isRemoteControlEnabled()) }
             var pendingAutoRequest by remember { mutableIntStateOf(if (shouldAutoRequest(intent)) 1 else 0) }
+            val navigationEventOwner = rememberNavigationEventDispatcherOwner(parent = null)
             val notificationPermissionLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.RequestPermission(),
             ) { }
@@ -66,11 +95,15 @@ class MainActivity : ComponentActivity() {
                 } else {
                     ScreenShareState.isSharing = false
                     projectionGranted = false
-                    startPermissionRequestService()
+                    if (savedAuth != null) startPermissionRequestService()
                 }
             }
 
             fun requestProjectionPermission() {
+                if (savedAuth == null) {
+                    dialogMessage = "请先登录账号"
+                    return
+                }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
@@ -84,6 +117,43 @@ class MainActivity : ComponentActivity() {
                 projectionLauncher.launch(captureIntent)
             }
 
+            fun login() {
+                if (isLoggingIn) return
+                if (username.isBlank() || password.isBlank()) {
+                    dialogMessage = "请填写账号和密码"
+                    return
+                }
+                isLoggingIn = true
+                AuthClient.loginAndroid(
+                    client = authClient,
+                    serverUrl = BuildConfig.SCREEN_SHARE_SERVER_URL,
+                    username = username,
+                    password = password,
+                    deviceId = localDeviceId(),
+                ) { result ->
+                    runOnUiThread {
+                        isLoggingIn = false
+                        result.onSuccess { auth ->
+                            AuthStore.save(this, BuildConfig.SCREEN_SHARE_SERVER_URL, username, auth)
+                            savedAuth = AuthStore.load(this)
+                            password = ""
+                            dialogMessage = ""
+                            startPermissionRequestService()
+                        }.onFailure {
+                            dialogMessage = "登录失败：${it.message ?: "请检查账号密码或网络连接"}"
+                        }
+                    }
+                }
+            }
+
+            fun logout() {
+                AuthStore.clear(this)
+                savedAuth = null
+                dialogMessage = "已退出登录"
+                stopService(Intent(this, PermissionRequestService::class.java))
+                stopService(Intent(this, ScreenShareService::class.java))
+            }
+
             DisposableEffect(Unit) {
                 projectionGranted = isScreenShareServiceRunning()
                 controlEnabled = isRemoteControlEnabled()
@@ -92,7 +162,7 @@ class MainActivity : ComponentActivity() {
                         if (intent.action == ScreenShareService.ACTION_SHARE_STOPPED) {
                             ScreenShareState.isSharing = false
                             projectionGranted = false
-                            startPermissionRequestService()
+                            if (savedAuth != null) startPermissionRequestService()
                         }
                     }
                 }
@@ -115,41 +185,88 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            LaunchedEffect(pendingAutoRequest) {
-                if (pendingAutoRequest > 0 && !projectionGranted) {
+            LaunchedEffect(pendingAutoRequest, savedAuth) {
+                if (pendingAutoRequest > 0 && savedAuth != null && !projectionGranted) {
                     requestProjectionPermission()
                 }
             }
 
-            MiuixTheme {
-                Box(
+            CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides navigationEventOwner) {
+
+                if (savedAuth == null) Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color(0xFFF7F8FA))
                         .padding(24.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        if (projectionGranted) {
-                            Text(text = "已获取权限，等待远程协助")
-                        } else {
-                            Button(
-                                onClick = { requestProjectionPermission() },
+                    LoginPanel(
+                        username = username,
+                        password = password,
+                        isLoggingIn = isLoggingIn,
+                        onUsernameChange = { username = it },
+                        onPasswordChange = { password = it },
+                        onLogin = { login() },
+                    )
+                }
+                else Scaffold(
+                    content = {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xFFF7F8FA))
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
                             ) {
-                                Text(text = "立即开始")
-                            }
-                        }
+                                StatusPanel(
+                                    projectionGranted = projectionGranted,
+                                    controlEnabled = controlEnabled,
+                                    deviceId = savedAuth?.deviceId ?: localDeviceId(),
+                                    serverUrl = savedAuth?.serverUrl ?: BuildConfig.SCREEN_SHARE_SERVER_URL,
+                                    username = savedAuth?.username ?: username,
+                                )
+                                Spacer(modifier = Modifier.height(18.dp))
+                                Row(horizontalArrangement = Arrangement.Center) {
+                                    Button(onClick = { requestProjectionPermission() }) {
+                                        Text(text = if (projectionGranted) "重新授权屏幕" else "立即开始")
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Button(
+                                        onClick = {
+                                            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                        },
+                                    ) {
+                                        Text(text = if (controlEnabled) "控制已开启" else "启用控制")
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Button(onClick = { logout() }) {
+                                    Text(text = "退出登录")
+                                }
+                                Spacer(modifier = Modifier.height(14.dp))
 
-                        if (!controlEnabled) {
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(
-                                onClick = {
-                                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                                },
-                            ) {
-                                Text(text = "启用远程控制")
+                                if (projectionGranted) Text(text = "已获取权限，等待远程协助")
                             }
                         }
+                    }
+                )
+
+                WindowDialog(
+                    show = dialogMessage.isNotBlank(),
+                    title = "提示",
+                    summary = dialogMessage,
+                    onDismissRequest = { dialogMessage = "" },
+                ) {
+                    Button(
+                        onClick = { dialogMessage = "" },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(text = "确定")
                     }
                 }
             }
@@ -194,7 +311,106 @@ class MainActivity : ComponentActivity() {
         return enabledServices.split(':').any { it.equals(expected, ignoreCase = true) }
     }
 
+    private fun localDeviceId(): String =
+        Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+            ?.takeIf { it.isNotBlank() }
+            ?: Build.MODEL
+
     companion object {
         const val EXTRA_AUTO_REQUEST_PERMISSION = "extra_auto_request_permission"
+    }
+}
+
+@Composable
+private fun LoginPanel(
+    username: String,
+    password: String,
+    isLoggingIn: Boolean,
+    onUsernameChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onLogin: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp, 0.dp)
+    ) {
+        LoginInput(
+            label = "账号",
+            value = username,
+            onValueChange = onUsernameChange
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        LoginInput(
+            label = "密码",
+            value = password,
+            onValueChange = onPasswordChange,
+            password = true,
+        )
+        Spacer(modifier = Modifier.height(14.dp))
+        Button(
+            onClick = onLogin,
+            colors = ButtonDefaults.buttonColorsPrimary(),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = if (isLoggingIn) "登录中" else "登录")
+        }
+    }
+}
+
+@Composable
+private fun LoginInput(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    password: Boolean = false,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        TextField(
+            label = label,
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier
+                .fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = if (password) KeyboardType.Password else KeyboardType.Text,
+            ),
+            visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
+        )
+    }
+}
+
+@Composable
+private fun StatusPanel(
+    projectionGranted: Boolean,
+    controlEnabled: Boolean,
+    deviceId: String,
+    serverUrl: String,
+    username: String,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White)
+            .padding(16.dp),
+    ) {
+        StatusRow("账号", username)
+        Spacer(modifier = Modifier.height(8.dp))
+        StatusRow("屏幕共享", if (projectionGranted) "已开启" else "未开启")
+        Spacer(modifier = Modifier.height(8.dp))
+        StatusRow("远程控制", if (controlEnabled) "已开启" else "未开启")
+        Spacer(modifier = Modifier.height(8.dp))
+        StatusRow("设备 ID", deviceId)
+        Spacer(modifier = Modifier.height(8.dp))
+        StatusRow("信令服务", serverUrl)
+    }
+}
+
+@Composable
+private fun StatusRow(label: String, value: String) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(text = label)
+        Text(text = value)
     }
 }

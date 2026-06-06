@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -75,13 +77,16 @@ func startHTTPServer(cfg config, publicIP string) (*http.Server, error) {
 	}
 
 	iceServers := buildICEServers(cfg, publicIP)
-	hub := newSignalingHub(iceServers, relayMode(cfg), cfg.SFUURL)
+	auth := newAuthService()
+	hub := newSignalingHub(iceServers, relayMode(cfg), cfg.SFUURL, auth)
 	mux := http.NewServeMux()
+	mux.Handle("/api/", auth.routes(hub))
 	mux.Handle("/ws", hub)
+	publicDir := staticPublicDir()
 	mux.HandleFunc("/viewer", func(writer http.ResponseWriter, request *http.Request) {
-		http.ServeFile(writer, request, "public/index.html")
+		http.ServeFile(writer, request, filepath.Join(publicDir, "index.html"))
 	})
-	mux.Handle("/viewer/", http.StripPrefix("/viewer/", http.FileServer(http.Dir("public"))))
+	mux.Handle("/viewer/", http.StripPrefix("/viewer/", http.FileServer(http.Dir(publicDir))))
 	mux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Write([]byte("Hello"))
 	})
@@ -92,6 +97,11 @@ func startHTTPServer(cfg config, publicIP string) (*http.Server, error) {
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	server.RegisterOnShutdown(func() {
+		if err := auth.close(); err != nil {
+			log.Printf("close auth database: %v", err)
+		}
+	})
 	go func() {
 		log.Printf("HTTP signaling/static server listening on http://%s", addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -99,6 +109,20 @@ func startHTTPServer(cfg config, publicIP string) (*http.Server, error) {
 		}
 	}()
 	return server, nil
+}
+
+func staticPublicDir() string {
+	if _, err := os.Stat(filepath.Join("public", "index.html")); err == nil {
+		return "public"
+	}
+	if _, err := os.Stat(filepath.Join("server", "public", "index.html")); err == nil {
+		return filepath.Join("server", "public")
+	}
+	_, file, _, ok := runtime.Caller(0)
+	if ok {
+		return filepath.Join(filepath.Dir(file), "public")
+	}
+	return "public"
 }
 
 func startTURNServer(cfg config) (*turn.Server, string, net.IP, error) {

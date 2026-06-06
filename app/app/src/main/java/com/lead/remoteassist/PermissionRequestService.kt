@@ -24,6 +24,7 @@ class PermissionRequestService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var webSocket: WebSocket? = null
     private var destroyed = false
+    private var auth: ServerAuth? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -49,8 +50,20 @@ class PermissionRequestService : Service() {
     }
 
     private fun connectSignaling() {
+        val saved = AuthStore.load(this)
+        if (saved == null) {
+            Log.i(TAG, "Not logged in; permission signaling disabled")
+            return
+        }
+        val session = ServerAuth(token = saved.token, deviceId = saved.deviceId)
+        auth = session
+        openSignaling(saved.serverUrl, session)
+    }
+
+    private fun openSignaling(serverUrl: String, session: ServerAuth) {
+        val wsUrl = AuthClient.authenticatedWebSocketUrl(serverUrl, session)
         webSocket = client.newWebSocket(
-            Request.Builder().url(BuildConfig.SCREEN_SHARE_SERVER_URL).build(),
+            Request.Builder().url(wsUrl).build(),
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     Log.i(TAG, "Permission signaling connected")
@@ -58,6 +71,7 @@ class PermissionRequestService : Service() {
                         JSONObject()
                             .put("type", "hello")
                             .put("role", "android-waiting")
+                            .put("deviceId", session.deviceId)
                             .toString(),
                     )
                 }

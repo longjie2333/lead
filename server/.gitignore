@@ -6,6 +6,9 @@ lead-turn-server.exe
 
 # Runtime data
 data/
+auth_store.json
+auth_store.json.tmp
+*.db-journal
 *.db
 *.db-shm
 *.db-wal

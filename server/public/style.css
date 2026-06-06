@@ -51,6 +51,249 @@ button {
   inset: 0;
 }
 
+.login-panel,
+.device-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: radial-gradient(circle at top, rgb(37 45 58 / 82%), rgb(5 6 8 / 94%) 46%);
+}
+
+.auth-alert {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(5 6 8 / 86%);
+  pointer-events: auto;
+}
+
+.auth-alert[hidden] {
+  display: none;
+}
+
+.auth-alert-box {
+  width: min(420px, 100%);
+  padding: 22px;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 8px;
+  background: rgb(14 17 22 / 92%);
+  box-shadow: 0 18px 42px rgb(0 0 0 / 42%);
+  pointer-events: auto;
+}
+
+.auth-alert-box h1 {
+  margin: 0 0 10px;
+  color: #f7f9fc;
+  font-size: 20px;
+}
+
+.auth-alert-box p {
+  margin: 0;
+  color: #c6cfdb;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.auth-param-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.auth-param-form[hidden] {
+  display: none;
+}
+
+.auth-param-form input,
+.auth-param-form button {
+  min-height: 42px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.auth-param-form input {
+  padding: 0 12px;
+  background: rgb(255 255 255 / 8%);
+  color: #f7f9fc;
+}
+
+.auth-param-form input::placeholder {
+  color: #7f8a99;
+}
+
+.auth-param-form button {
+  background: #eef3f7;
+  color: #11151b;
+  cursor: pointer;
+}
+
+.login-panel[hidden],
+.device-panel[hidden] {
+  display: none;
+}
+
+.login-form,
+.device-panel > .device-list-head,
+.device-list {
+  width: min(420px, 100%);
+}
+
+.login-form {
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 8px;
+  background: rgb(14 17 22 / 88%);
+}
+
+.login-form h1 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.login-form p {
+  margin: 0;
+  color: #aeb8c7;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.login-form input,
+.login-form button,
+.device-list-head button,
+.device-item {
+  min-height: 42px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.login-form input {
+  padding: 0 12px;
+  background: rgb(255 255 255 / 8%);
+  color: #f7f9fc;
+}
+
+.login-form button,
+.device-list-head button,
+.device-item {
+  background: #eef3f7;
+  color: #11151b;
+  cursor: pointer;
+}
+
+#login-error {
+  min-height: 18px;
+  margin: 0;
+  color: #ffb3b3;
+  font-size: 13px;
+}
+
+.device-panel {
+  align-content: center;
+  gap: 12px;
+}
+
+.device-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 8px;
+  background: rgb(14 17 22 / 82%);
+  color: #f7f9fc;
+}
+
+.device-list-head strong,
+.device-list-head span {
+  display: block;
+}
+
+.device-list-head span {
+  margin-top: 3px;
+  color: #aeb8c7;
+  font-size: 12px;
+}
+
+.device-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.device-list-head button {
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.device-list {
+  display: grid;
+  gap: 8px;
+}
+
+.device-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.device-item span,
+.device-empty {
+  overflow-wrap: anywhere;
+}
+
+.device-item strong,
+.device-item small,
+.device-item em,
+.device-empty strong,
+.device-empty span {
+  display: block;
+}
+
+.device-item small,
+.device-empty span {
+  color: #526071;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.device-item em {
+  min-width: 44px;
+  border-radius: 999px;
+  color: #526071;
+  font-size: 12px;
+  font-style: normal;
+  text-align: right;
+}
+
+.device-item.online em {
+  color: #1d7c45;
+}
+
+.device-empty {
+  padding: 18px;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 8px;
+  background: rgb(14 17 22 / 82%);
+}
+
+.device-empty strong {
+  margin-bottom: 4px;
+  color: #f7f9fc;
+}
+
 .stage {
   background: #050608;
   overflow: hidden;
