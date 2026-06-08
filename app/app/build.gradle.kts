@@ -37,6 +37,7 @@ dependencies {
     implementation("androidx.navigationevent:navigationevent-compose-android:1.0.2")
     implementation("org.jetbrains.compose.foundation:foundation:1.10.3")
     implementation("top.yukonga.miuix.kmp:miuix-android:0.8.8")
+    implementation("top.yukonga.miuix.kmp:miuix-icons:0.8.8")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
     implementation("io.github.webrtc-sdk:android:144.7559.05")
 }

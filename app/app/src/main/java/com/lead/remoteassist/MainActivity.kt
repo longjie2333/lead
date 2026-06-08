@@ -21,12 +21,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -53,11 +55,17 @@ import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
 import okhttp3.OkHttpClient
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.extra.WindowDialog
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Play
+import top.yukonga.miuix.kmp.icon.extended.RemoveContact
+import top.yukonga.miuix.kmp.icon.extended.Replace
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
@@ -210,11 +218,42 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 else Scaffold(
+                    topBar = {
+                        SmallTopAppBar(
+                            title = "",
+                            actions = {
+                                Button(
+                                    colors = ButtonDefaults.buttonColors(
+                                        color = MiuixTheme.colorScheme.background
+                                    ),
+                                    insideMargin = PaddingValues(16.dp, 10.dp),
+                                    onClick = { logout() }
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.End
+                                    ) {
+                                        Text(text = savedAuth?.username ?: username)
+                                        Text(
+                                            text = savedAuth?.deviceId ?: localDeviceId(),
+                                            color = MiuixTheme.colorScheme.onSecondaryVariant,
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Icon(
+                                        MiuixIcons.RemoveContact,
+                                        "account"
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                            }
+                        )
+                    },
                     content = {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color(0xFFF7F8FA))
+                                .background(MiuixTheme.colorScheme.surface)
                                 .padding(24.dp),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -223,34 +262,51 @@ class MainActivity : ComponentActivity() {
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center,
                             ) {
-                                StatusPanel(
-                                    projectionGranted = projectionGranted,
-                                    controlEnabled = controlEnabled,
-                                    deviceId = savedAuth?.deviceId ?: localDeviceId(),
-                                    serverUrl = savedAuth?.serverUrl ?: BuildConfig.SCREEN_SHARE_SERVER_URL,
-                                    username = savedAuth?.username ?: username,
-                                )
-                                Spacer(modifier = Modifier.height(18.dp))
-                                Row(horizontalArrangement = Arrangement.Center) {
-                                    Button(onClick = { requestProjectionPermission() }) {
-                                        Text(text = if (projectionGranted) "重新授权屏幕" else "立即开始")
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Button(
-                                        onClick = {
-                                            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                                        },
+                                Button(
+                                    colors = ButtonDefaults.buttonColorsPrimary(),
+                                    minWidth = 200.dp,
+                                    minHeight = 120.dp,
+                                    onClick = { requestProjectionPermission() }
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
-                                        Text(text = if (controlEnabled) "控制已开启" else "启用控制")
+                                        if (projectionGranted) {
+                                            Icon(
+                                                imageVector = MiuixIcons.Replace,
+                                                contentDescription = "ReStart",
+                                                modifier = Modifier.size(32.dp)
+                                            )
+                                            Spacer(Modifier.height(10.dp))
+                                            Text(
+                                                text = "重新授权协助",
+                                                fontSize = 20.sp
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = MiuixIcons.Play,
+                                                contentDescription = "Start",
+                                                modifier = Modifier.size(32.dp)
+                                            )
+                                            Spacer(Modifier.height(10.dp))
+                                            Text(
+                                                text = "立即开始",
+                                                fontSize = 20.sp
+                                            )
+                                        }
                                     }
                                 }
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Button(onClick = { logout() }) {
-                                    Text(text = "退出登录")
+                                Button(
+                                    minWidth = 200.dp,
+                                    minHeight = 60.dp,
+                                    enabled = projectionGranted,
+                                    onClick = {
+                                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                    },
+                                ) {
+                                    Text(text = if (controlEnabled) "已允许对方控制" else "允许控制")
                                 }
-                                Spacer(modifier = Modifier.height(14.dp))
-
-                                if (projectionGranted) Text(text = "已获取权限，等待远程协助")
                             }
                         }
                     }
@@ -330,7 +386,7 @@ private fun LoginPanel(
     onPasswordChange: (String) -> Unit,
     onLogin: () -> Unit,
 ) {
-    Card(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp, 0.dp)
@@ -378,39 +434,5 @@ private fun LoginInput(
             ),
             visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
         )
-    }
-}
-
-@Composable
-private fun StatusPanel(
-    projectionGranted: Boolean,
-    controlEnabled: Boolean,
-    deviceId: String,
-    serverUrl: String,
-    username: String,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.White)
-            .padding(16.dp),
-    ) {
-        StatusRow("账号", username)
-        Spacer(modifier = Modifier.height(8.dp))
-        StatusRow("屏幕共享", if (projectionGranted) "已开启" else "未开启")
-        Spacer(modifier = Modifier.height(8.dp))
-        StatusRow("远程控制", if (controlEnabled) "已开启" else "未开启")
-        Spacer(modifier = Modifier.height(8.dp))
-        StatusRow("设备 ID", deviceId)
-        Spacer(modifier = Modifier.height(8.dp))
-        StatusRow("信令服务", serverUrl)
-    }
-}
-
-@Composable
-private fun StatusRow(label: String, value: String) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(text = label)
-        Text(text = value)
     }
 }
