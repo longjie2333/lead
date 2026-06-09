@@ -1,4 +1,4 @@
-package main
+package signaling
 
 import (
 	"encoding/json"
@@ -10,21 +10,17 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"lead-turn-server/internal/auth"
+	"lead-turn-server/internal/config"
 )
 
-type iceServer struct {
-	URLs       any    `json:"urls"`
-	Username   string `json:"username,omitempty"`
-	Credential string `json:"credential,omitempty"`
-}
-
-type signalingHub struct {
+type Hub struct {
 	upgrader websocket.Upgrader
 	nextID   atomic.Uint64
 
 	mu         sync.Mutex
-	auth       *authService
-	iceServers []iceServer
+	auth       *auth.Service
+	iceServers []config.ICEServer
 	mode       string
 	sfuURL     string
 	devices    map[string]*deviceSession
@@ -48,8 +44,8 @@ type signalClient struct {
 	mu        sync.Mutex
 }
 
-func newSignalingHub(iceServers []iceServer, mode string, sfuURL string, auth *authService) *signalingHub {
-	return &signalingHub{
+func NewHub(iceServers []config.ICEServer, mode string, sfuURL string, auth *auth.Service) *Hub {
+	return &Hub{
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -61,19 +57,19 @@ func newSignalingHub(iceServers []iceServer, mode string, sfuURL string, auth *a
 	}
 }
 
-func (h *signalingHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	token := bearerToken(r)
-	accountID, ok := h.auth.accountForToken(token)
+	token := auth.BearerToken(r)
+	accountID, ok := h.auth.AccountForToken(token)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	deviceID := r.URL.Query().Get("deviceId")
-	if deviceID != "" && !h.auth.deviceBelongsTo(accountID, deviceID) {
+	if deviceID != "" && !h.auth.DeviceBelongsTo(accountID, deviceID) {
 		http.Error(w, "device not found", http.StatusForbidden)
 		return
 	}
@@ -105,7 +101,7 @@ func (h *signalingHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *signalingHub) handleControl(client *signalClient, payload []byte) {
+func (h *Hub) handleControl(client *signalClient, payload []byte) {
 	var data map[string]any
 	if err := json.Unmarshal(payload, &data); err != nil {
 		return
@@ -168,8 +164,8 @@ func (h *signalingHub) handleControl(client *signalClient, payload []byte) {
 	}
 }
 
-func (h *signalingHub) registerAndroidLocked(client *signalClient, data map[string]any) {
-	if client.deviceID == "" || !h.auth.deviceBelongsTo(client.accountID, client.deviceID) {
+func (h *Hub) registerAndroidLocked(client *signalClient, data map[string]any) {
+	if client.deviceID == "" || !h.auth.DeviceBelongsTo(client.accountID, client.deviceID) {
 		client.send(map[string]any{"type": "error", "message": "deviceId is required"})
 		return
 	}
@@ -178,7 +174,7 @@ func (h *signalingHub) registerAndroidLocked(client *signalClient, data map[stri
 	session.activeAndroid = client
 	session.streamInfo = cloneMap(data)
 	session.streamInfo["type"] = "stream-info"
-	h.auth.setDeviceOnline(client.accountID, client.deviceID, true)
+	h.auth.SetDeviceOnline(client.accountID, client.deviceID, true)
 	client.send(h.withServerConfig(map[string]any{"type": "config"}))
 	h.broadcastToViewers(session, h.withServerConfig(cloneMap(session.streamInfo)))
 	for _, viewer := range session.viewers {
@@ -186,23 +182,23 @@ func (h *signalingHub) registerAndroidLocked(client *signalClient, data map[stri
 	}
 }
 
-func (h *signalingHub) registerWaitingAndroidLocked(client *signalClient) {
-	if client.deviceID == "" || !h.auth.deviceBelongsTo(client.accountID, client.deviceID) {
+func (h *Hub) registerWaitingAndroidLocked(client *signalClient) {
+	if client.deviceID == "" || !h.auth.DeviceBelongsTo(client.accountID, client.deviceID) {
 		client.send(map[string]any{"type": "error", "message": "deviceId is required"})
 		return
 	}
 	session := h.sessionLocked(client.accountID, client.deviceID)
 	client.role = "android-waiting"
 	session.waitingAndroidClients[client] = struct{}{}
-	h.auth.setDeviceOnline(client.accountID, client.deviceID, false)
+	h.auth.SetDeviceOnline(client.accountID, client.deviceID, false)
 	client.send(h.withServerConfig(map[string]any{"type": "config"}))
 	if session.activeAndroid == nil && len(session.viewers) > 0 {
 		client.send(map[string]any{"type": "remote-request", "deviceId": client.deviceID})
 	}
 }
 
-func (h *signalingHub) registerViewerLocked(client *signalClient) {
-	if client.deviceID == "" || !h.auth.deviceBelongsTo(client.accountID, client.deviceID) {
+func (h *Hub) registerViewerLocked(client *signalClient) {
+	if client.deviceID == "" || !h.auth.DeviceBelongsTo(client.accountID, client.deviceID) {
 		client.send(map[string]any{"type": "error", "message": "viewer deviceId is required"})
 		return
 	}
@@ -218,7 +214,7 @@ func (h *signalingHub) registerViewerLocked(client *signalClient) {
 	h.notifyWaitingAndroidLocked(session)
 }
 
-func (h *signalingHub) removeClient(client *signalClient) {
+func (h *Hub) removeClient(client *signalClient) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -231,7 +227,7 @@ func (h *signalingHub) removeClient(client *signalClient) {
 		if session.activeAndroid == client {
 			session.activeAndroid = nil
 			session.streamInfo = nil
-			h.auth.setDeviceOnline(client.accountID, client.deviceID, false)
+			h.auth.SetDeviceOnline(client.accountID, client.deviceID, false)
 			h.broadcastToViewers(session, map[string]any{"type": "android-disconnected", "deviceId": client.deviceID})
 		}
 	case "android-waiting":
@@ -245,7 +241,7 @@ func (h *signalingHub) removeClient(client *signalClient) {
 	}
 }
 
-func (h *signalingHub) sessionLocked(accountID, deviceID string) *deviceSession {
+func (h *Hub) sessionLocked(accountID, deviceID string) *deviceSession {
 	session := h.devices[deviceID]
 	if session == nil {
 		session = &deviceSession{
@@ -259,25 +255,25 @@ func (h *signalingHub) sessionLocked(accountID, deviceID string) *deviceSession 
 	return session
 }
 
-func (h *signalingHub) sendToAndroidLocked(session *deviceSession, data map[string]any) {
+func (h *Hub) sendToAndroidLocked(session *deviceSession, data map[string]any) {
 	if session.activeAndroid != nil {
 		session.activeAndroid.send(data)
 	}
 }
 
-func (h *signalingHub) notifyWaitingAndroidLocked(session *deviceSession) {
+func (h *Hub) notifyWaitingAndroidLocked(session *deviceSession) {
 	for client := range session.waitingAndroidClients {
 		client.send(map[string]any{"type": "remote-request", "deviceId": session.deviceID})
 	}
 }
 
-func (h *signalingHub) broadcastToViewers(session *deviceSession, data map[string]any) {
+func (h *Hub) broadcastToViewers(session *deviceSession, data map[string]any) {
 	for _, viewer := range session.viewers {
 		viewer.send(data)
 	}
 }
 
-func (h *signalingHub) withServerConfig(data map[string]any) map[string]any {
+func (h *Hub) withServerConfig(data map[string]any) map[string]any {
 	if data == nil {
 		data = make(map[string]any)
 	}
@@ -293,18 +289,6 @@ func (c *signalClient) send(data map[string]any) {
 	if err := c.conn.WriteJSON(data); err != nil {
 		log.Printf("write websocket: %v", err)
 	}
-}
-
-func parseICEServersJSON(value string) ([]iceServer, bool) {
-	if value == "" {
-		return nil, false
-	}
-	var servers []iceServer
-	if err := json.Unmarshal([]byte(value), &servers); err != nil {
-		log.Printf("Invalid ICE_SERVERS_JSON: %v", err)
-		return nil, false
-	}
-	return servers, true
 }
 
 func cloneMap(input map[string]any) map[string]any {

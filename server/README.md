@@ -14,7 +14,7 @@ cd server
 
 ```powershell
 $env:TURN_PUBLIC_IP="127.0.0.1"
-go run .
+go run ./cmd/server
 ```
 
 局域网真机测试时，`TURN_PUBLIC_IP` 应设置为电脑在局域网中的 IPv4 地址：
@@ -24,7 +24,7 @@ $env:TURN_PUBLIC_IP="192.168.1.20"
 $env:TURN_USERNAME="lead"
 $env:TURN_CREDENTIAL="leadpass"
 $env:ADMIN_PASSWORD="your-admin-password"
-go run .
+go run ./cmd/server
 ```
 
 启动后访问：
@@ -73,7 +73,7 @@ node --check public/viewer.js
 | `ADMIN_PASSWORD` | `admin` | 无 | 默认管理员 `admin` 的密码。 |
 | `ICE_SERVERS_JSON` | 空 | 无 | 完全自定义下发给客户端的 ICE servers JSON；配置且解析成功时，会替代默认 STUN 和内置 TURN。解析失败时记录日志并回退到默认 ICE 配置。 |
 
-默认 ICE 配置由 `buildICEServers` 生成：
+默认 ICE 配置由 `internal/config.BuildICEServers` 生成：
 
 | 顺序 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -107,21 +107,24 @@ $env:TURN_MAX_PORT="50100"
 
 ```text
 server/
-  main.go          程序入口、配置加载、HTTP 路由、TURN 启动
-  auth.go          登录鉴权、token、设备绑定、SQLite 持久化
-  signaling.go     WebSocket 信令转发、ICE 配置下发、viewer/android 会话管理
-  public/          viewer 静态页面资源
-  data/            默认 SQLite 数据目录
+  cmd/server/              程序入口，负责配置加载、TURN/HTTP 启动和退出信号处理
+  internal/app/            Gin HTTP 服务装配，挂载静态资源、API 和 WebSocket 路由
+  internal/auth/           登录鉴权、token、用户权限、设备绑定、SQLite 持久化
+  internal/config/         统一环境变量和命令行参数配置入口
+  internal/signaling/      WebSocket 信令转发、ICE 配置下发、viewer/android 会话管理
+  internal/turnserver/     内置 TURN UDP relay 服务
+  public/                  viewer 静态页面资源
+  data/                    默认 SQLite 数据目录
 ```
 
 运行时模块：
 
 | 模块 | 文件 | 职责 |
 | --- | --- | --- |
-| HTTP 静态服务 | `main.go` | 通过 `/viewer` 提供 `public/index.html`，通过 `/viewer/*` 提供 JS/CSS 等静态资源。 |
-| 鉴权服务 | `auth.go` | 处理登录、退出、设备列表；维护 token 与设备绑定；使用 SQLite 持久化。 |
-| 信令中心 | `signaling.go` | Android 与 viewer 通过同一个 `/ws` 建立 WebSocket，后端按 `deviceId` 转发 WebRTC offer/answer/ICE/control 消息。 |
-| TURN 服务 | `main.go` | 基于 Pion TURN 提供 UDP relay，供 WebRTC P2P 失败时中转媒体流量。 |
+| HTTP 静态服务 | `internal/app` | 通过 `/viewer` 提供 `public/index.html`，通过 `/viewer/*` 提供 JS/CSS 等静态资源，并挂载 `/api/*` 和 `/ws`。 |
+| 鉴权服务 | `internal/auth` | 处理登录、退出、设备列表；维护用户、token 与设备绑定；使用 SQLite 持久化。 |
+| 信令中心 | `internal/signaling` | Android 与 viewer 通过同一个 `/ws` 建立 WebSocket，后端按 `deviceId` 转发 WebRTC offer/answer/ICE/control 消息。 |
+| TURN 服务 | `internal/turnserver` | 基于 Pion TURN 提供 UDP relay，供 WebRTC P2P 失败时中转媒体流量。 |
 
 默认账号：
 
@@ -138,7 +141,7 @@ server/
 server/data/auth.db
 ```
 
-服务启动时会自动创建表结构。token 和设备绑定会持久化；设备在线状态根据新的 WebSocket 连接重新计算。
+服务启动时会自动创建表结构。用户、token 和设备绑定会持久化；设备在线状态根据新的 WebSocket 连接重新计算。
 
 ## 接口文档
 
@@ -152,6 +155,12 @@ server/data/auth.db
 | `POST` | `/api/login` | JSON：`username`、`password`、`source`；Android 端还可传 `deviceId`、`deviceName` | JSON：`token`、`user`、`devices`；Android 登录时额外返回 `device`。 |
 | `POST` | `/api/logout` | Header：`Authorization: Bearer <token>`，或 query：`token` | `204 No Content`。 |
 | `GET` | `/api/devices` | Header：`Authorization: Bearer <token>`，或 query：`token` | JSON：`{"devices":[...]}`。 |
+| `GET` | `/api/users` | Header：`Authorization: Bearer <token>`，管理员 | JSON：`{"users":[...]}`。 |
+| `POST` | `/api/users` | Header：`Authorization: Bearer <token>`，管理员；JSON：`username`、`password`，可选 `role` 或 `isAdmin` | `201 Created`，JSON：`{"user":{...}}`。 |
+| `GET` | `/api/users/{id}` | Header：`Authorization: Bearer <token>`；管理员可查任意用户，普通用户只能查自己 | JSON：`{"user":{...}}`。 |
+| `PUT` | `/api/users/{id}` | Header：`Authorization: Bearer <token>`；JSON：可选 `username`、`password`、`role`、`isAdmin` | JSON：`{"user":{...}}`。 |
+| `PATCH` | `/api/users/{id}` | Header：`Authorization: Bearer <token>`；JSON：可选 `username`、`password`、`role`、`isAdmin` | JSON：`{"user":{...}}`。 |
+| `DELETE` | `/api/users/{id}` | Header：`Authorization: Bearer <token>`，管理员 | `204 No Content`。 |
 
 登录请求示例：
 
@@ -172,7 +181,9 @@ server/data/auth.db
   "token": "64位十六进制token",
   "user": {
     "id": "admin",
-    "username": "admin"
+    "username": "admin",
+    "role": "admin",
+    "isAdmin": true
   },
   "device": {
     "id": "device-1",
@@ -182,6 +193,58 @@ server/data/auth.db
     "updatedAt": 1710000000000
   },
   "devices": []
+}
+```
+
+用户管理接口说明：
+
+- 新用户默认角色为 `user`。
+- `role` 只能是 `admin` 或 `user`；也可以用 `isAdmin: true/false` 设置角色。
+- 只有管理员可以创建用户、查看用户列表、删除用户、修改任意用户的用户名/密码/角色。
+- 普通用户只能查看自己，只能修改自己的密码；不能修改用户名或角色。
+- 不能删除当前登录用户。
+- 不能删除最后一个管理员，也不能把最后一个管理员降级为普通用户。
+
+创建普通用户示例：
+
+```json
+{
+  "username": "operator",
+  "password": "secret"
+}
+```
+
+创建管理员示例：
+
+```json
+{
+  "username": "manager",
+  "password": "secret",
+  "role": "admin"
+}
+```
+
+更新用户示例：
+
+```json
+{
+  "password": "new-secret",
+  "role": "user"
+}
+```
+
+用户响应示例：
+
+```json
+{
+  "user": {
+    "id": "user-xxxxxxxxxxxxxxxx",
+    "username": "operator",
+    "role": "user",
+    "isAdmin": false,
+    "createdAt": 1710000000000,
+    "updatedAt": 1710000000000
+  }
 }
 ```
 
@@ -232,7 +295,7 @@ ws://localhost:8787/ws?token=<token>&deviceId=<deviceId>
 flowchart TD
     A["启动 Go 后端"] --> B["加载配置: 环境变量 + 命令行参数"]
     B --> C["启动内置 TURN UDP 服务"]
-    B --> D["启动 HTTP 服务"]
+    B --> D["启动 Gin HTTP 服务"]
     D --> E["挂载静态页面: /viewer 和 /viewer/*"]
     D --> F["挂载鉴权接口: /api/login /api/logout /api/devices"]
     D --> G["挂载 WebSocket 信令: /ws"]
