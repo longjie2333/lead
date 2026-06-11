@@ -1,0 +1,9 @@
+.git
+.idea
+data
+tmp
+*.db
+*.db-shm
+*.db-wal
+coverage.out
+lead-server
