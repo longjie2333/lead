@@ -3,10 +3,12 @@ name: Android
 on:
   pull_request:
     branches:
+      - dev
       - main
       - master
   push:
     branches:
+      - dev
       - main
       - master
     tags:
@@ -78,13 +80,36 @@ jobs:
             -PversionName="$version_name" \
             testReleaseUnitTest lintRelease assembleRelease bundleRelease
 
-      - name: Upload release artifacts
+      - name: Upload dev APK artifact
+        if: github.ref == 'refs/heads/dev'
         uses: actions/upload-artifact@v4
         with:
-          name: lead-android-release
-          path: |
-            app/app/build/outputs/apk/release/*.apk
-            app/app/build/outputs/bundle/release/*.aab
+          name: lead-android-dev-apk
+          path: app/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Upload dev AAB artifact
+        if: github.ref == 'refs/heads/dev'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lead-android-dev-aab
+          path: app/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+
+      - name: Upload release APK artifact
+        if: github.ref != 'refs/heads/dev'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lead-android-release-apk
+          path: app/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Upload release AAB artifact
+        if: github.ref != 'refs/heads/dev'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lead-android-release-aab
+          path: app/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
 
   release:
@@ -99,8 +124,14 @@ jobs:
       - name: Download Android artifacts
         uses: actions/download-artifact@v4
         with:
-          name: lead-android-release
-          path: dist/android
+          name: lead-android-release-apk
+          path: dist/android-apk
+
+      - name: Download Android AAB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lead-android-release-aab
+          path: dist/android-aab
 
       - name: Publish Android artifacts
         env:
@@ -108,4 +139,4 @@ jobs:
         run: |
           gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 \
             || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" dist/android/* --clobber
+          gh release upload "$GITHUB_REF_NAME" dist/android-apk/*.apk dist/android-aab/*.aab --clobber

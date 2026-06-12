@@ -3,10 +3,12 @@ name: Backend
 on:
   pull_request:
     branches:
+      - dev
       - main
       - master
   push:
     branches:
+      - dev
       - main
       - master
     tags:
@@ -47,7 +49,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-        
+
       - name: Install C toolchains
         run: |
           sudo apt-get update
@@ -57,7 +59,14 @@ jobs:
             gcc-aarch64-linux-gnu \
             gcc-mingw-w64-x86-64 \
             libc6-dev \
+            libc6-dev-arm64-cross \
             zip
+
+      - name: Verify C toolchains
+        run: |
+          printf '#include <stdlib.h>\nint main(void) { return 0; }\n' | x86_64-linux-gnu-gcc -x c -o /tmp/check-linux-amd64 -
+          printf '#include <stdlib.h>\nint main(void) { return 0; }\n' | aarch64-linux-gnu-gcc -x c -o /tmp/check-linux-arm64 -
+          printf '#include <stdlib.h>\nint main(void) { return 0; }\n' | x86_64-w64-mingw32-gcc -x c -o /tmp/check-windows-amd64.exe -
 
       - name: Check formatting
         run: |
@@ -111,10 +120,19 @@ jobs:
               | xargs -0 sha256sum > SHA256SUMS
           )
 
-      - name: Upload backend artifacts
+      - name: Upload dev backend artifact
+        if: github.ref == 'refs/heads/dev'
         uses: actions/upload-artifact@v4
         with:
-          name: lead-server-binaries
+          name: lead-server-dev-binaries
+          path: dist/server/*
+          if-no-files-found: error
+
+      - name: Upload release backend artifact
+        if: github.ref != 'refs/heads/dev'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lead-server-release-binaries
           path: dist/server/*
           if-no-files-found: error
 
@@ -144,9 +162,10 @@ jobs:
         with:
           images: ${{ env.SERVER_IMAGE }}
           tags: |
-            type=ref,event=branch
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=ref,event=branch,enable=${{ github.ref != 'refs/heads/dev' }}
             type=ref,event=tag
-            type=sha,prefix=sha-
+            type=sha,prefix=sha-,enable=${{ github.ref != 'refs/heads/dev' }}
 
       - name: Build and push image
         uses: docker/build-push-action@v6
@@ -173,7 +192,7 @@ jobs:
       - name: Download backend artifacts
         uses: actions/download-artifact@v4
         with:
-          name: lead-server-binaries
+          name: lead-server-release-binaries
           path: dist/server
 
       - name: Publish backend artifacts
