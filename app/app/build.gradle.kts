@@ -40,7 +40,7 @@ android {
             val storeFilePath = signingProperties.getProperty("storeFile")
 
             if (!storeFilePath.isNullOrBlank()) {
-                storeFile = file(storeFilePath)
+                storeFile = rootProject.file(storeFilePath)
             }
 
             storePassword = signingProperties.getProperty("storePassword")
