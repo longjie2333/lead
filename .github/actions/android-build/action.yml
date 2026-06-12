@@ -1,0 +1,441 @@
+name: Android Build
+description: Build one Android variant and collect APK/AAB artifacts. Release publishing stays in the caller workflow.
+
+inputs:
+  working-directory:
+    description: Gradle project directory, relative to GITHUB_WORKSPACE unless absolute.
+    required: false
+    default: "."
+  setup-java:
+    description: Whether to run actions/setup-java.
+    required: false
+    default: "true"
+  java-distribution:
+    description: JDK distribution passed to actions/setup-java.
+    required: false
+    default: temurin
+  java-version:
+    description: JDK version passed to actions/setup-java.
+    required: false
+    default: "17"
+  setup-android:
+    description: Whether to run android-actions/setup-android.
+    required: false
+    default: "true"
+  setup-gradle:
+    description: Whether to run gradle/actions/setup-gradle.
+    required: false
+    default: "true"
+  gradle-wrapper:
+    description: Gradle executable or wrapper path, relative to working-directory unless absolute.
+    required: false
+    default: ./gradlew
+  chmod-gradle-wrapper:
+    description: Whether to chmod +x the Gradle wrapper when it is a file.
+    required: false
+    default: "true"
+  gradle-args:
+    description: Extra Gradle CLI arguments, split by whitespace per line.
+    required: false
+    default: --no-daemon
+  gradle-tasks:
+    description: Gradle tasks to run. Whitespace-separated or one task per line.
+    required: false
+    default: assembleRelease
+  project-properties:
+    description: Newline-separated Gradle project properties in key=value form. Each line becomes -Pkey=value.
+    required: false
+    default: ""
+  version-code:
+    description: Optional Android versionCode project property.
+    required: false
+    default: ""
+  version-name:
+    description: Optional Android versionName project property.
+    required: false
+    default: ""
+  pre-build-command:
+    description: Optional bash command executed in working-directory before Gradle runs.
+    required: false
+    default: ""
+  post-build-command:
+    description: Optional bash command executed in working-directory after Gradle runs and before artifact collection.
+    required: false
+    default: ""
+  signing-keystore-base64:
+    description: Optional base64-encoded Android signing keystore.
+    required: false
+    default: ""
+  signing-keystore-path:
+    description: Path to write the decoded signing keystore, relative to working-directory unless absolute.
+    required: false
+    default: release.keystore
+  signing-properties-path:
+    description: Path to write signing.properties, relative to working-directory unless absolute.
+    required: false
+    default: signing.properties
+  signing-store-password:
+    description: Optional signing store password written to signing.properties.
+    required: false
+    default: ""
+  signing-key-alias:
+    description: Optional signing key alias written to signing.properties.
+    required: false
+    default: ""
+  signing-key-password:
+    description: Optional signing key password written to signing.properties.
+    required: false
+    default: ""
+  artifact-name:
+    description: Base name used for collected APK/AAB files and the artifact directory.
+    required: false
+    default: android-build
+  output-dir:
+    description: Directory for collected artifacts, relative to GITHUB_WORKSPACE unless absolute.
+    required: false
+    default: dist/android
+  include-apk:
+    description: Whether to collect APK outputs.
+    required: false
+    default: "true"
+  include-aab:
+    description: Whether to collect AAB outputs.
+    required: false
+    default: "true"
+  apk-globs:
+    description: Newline-separated APK globs, relative to working-directory unless absolute.
+    required: false
+    default: "**/build/outputs/apk/**/*.apk"
+  aab-globs:
+    description: Newline-separated AAB globs, relative to working-directory unless absolute.
+    required: false
+    default: "**/build/outputs/bundle/**/*.aab"
+  fail-on-empty:
+    description: Whether to fail when no APK/AAB artifacts are collected.
+    required: false
+    default: "true"
+  checksum:
+    description: Checksum file to generate. Supported values are sha256 and none.
+    required: false
+    default: sha256
+
+outputs:
+  artifact-name:
+    description: Base artifact name.
+    value: ${{ steps.build.outputs.artifact-name }}
+  artifact-dir:
+    description: Directory containing all collected Android artifacts.
+    value: ${{ steps.build.outputs.artifact-dir }}
+  artifact-path:
+    description: Alias of artifact-dir for upload-artifact callers.
+    value: ${{ steps.build.outputs.artifact-path }}
+  apk-dir:
+    description: Directory containing collected APK files.
+    value: ${{ steps.build.outputs.apk-dir }}
+  aab-dir:
+    description: Directory containing collected AAB files.
+    value: ${{ steps.build.outputs.aab-dir }}
+  apk-paths:
+    description: Newline-separated collected APK paths.
+    value: ${{ steps.build.outputs.apk-paths }}
+  aab-paths:
+    description: Newline-separated collected AAB paths.
+    value: ${{ steps.build.outputs.aab-paths }}
+  checksum-path:
+    description: Generated checksum file path, if checksum is enabled.
+    value: ${{ steps.build.outputs.checksum-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Java
+      if: ${{ inputs.setup-java == 'true' }}
+      uses: actions/setup-java@v4
+      with:
+        distribution: ${{ inputs.java-distribution }}
+        java-version: ${{ inputs.java-version }}
+
+    - name: Set up Android SDK
+      if: ${{ inputs.setup-android == 'true' }}
+      uses: android-actions/setup-android@v3
+
+    - name: Set up Gradle
+      if: ${{ inputs.setup-gradle == 'true' }}
+      uses: gradle/actions/setup-gradle@v4
+
+    - id: build
+      name: Build Android artifacts
+      shell: bash
+      env:
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        INPUT_GRADLE_WRAPPER: ${{ inputs.gradle-wrapper }}
+        INPUT_CHMOD_GRADLE_WRAPPER: ${{ inputs.chmod-gradle-wrapper }}
+        INPUT_GRADLE_ARGS: ${{ inputs.gradle-args }}
+        INPUT_GRADLE_TASKS: ${{ inputs.gradle-tasks }}
+        INPUT_PROJECT_PROPERTIES: ${{ inputs.project-properties }}
+        INPUT_VERSION_CODE: ${{ inputs.version-code }}
+        INPUT_VERSION_NAME: ${{ inputs.version-name }}
+        INPUT_PRE_BUILD_COMMAND: ${{ inputs.pre-build-command }}
+        INPUT_POST_BUILD_COMMAND: ${{ inputs.post-build-command }}
+        INPUT_SIGNING_KEYSTORE_BASE64: ${{ inputs.signing-keystore-base64 }}
+        INPUT_SIGNING_KEYSTORE_PATH: ${{ inputs.signing-keystore-path }}
+        INPUT_SIGNING_PROPERTIES_PATH: ${{ inputs.signing-properties-path }}
+        INPUT_SIGNING_STORE_PASSWORD: ${{ inputs.signing-store-password }}
+        INPUT_SIGNING_KEY_ALIAS: ${{ inputs.signing-key-alias }}
+        INPUT_SIGNING_KEY_PASSWORD: ${{ inputs.signing-key-password }}
+        INPUT_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        INPUT_OUTPUT_DIR: ${{ inputs.output-dir }}
+        INPUT_INCLUDE_APK: ${{ inputs.include-apk }}
+        INPUT_INCLUDE_AAB: ${{ inputs.include-aab }}
+        INPUT_APK_GLOBS: ${{ inputs.apk-globs }}
+        INPUT_AAB_GLOBS: ${{ inputs.aab-globs }}
+        INPUT_FAIL_ON_EMPTY: ${{ inputs.fail-on-empty }}
+        INPUT_CHECKSUM: ${{ inputs.checksum }}
+      run: |
+        set -euo pipefail
+
+        trim() {
+          local value="$*"
+          value="${value#"${value%%[![:space:]]*}"}"
+          value="${value%"${value##*[![:space:]]}"}"
+          printf '%s' "$value"
+        }
+
+        resolve_from_workspace() {
+          local path="$1"
+          if [[ "$path" = /* ]]; then
+            printf '%s' "$path"
+          else
+            printf '%s/%s' "$GITHUB_WORKSPACE" "$path"
+          fi
+        }
+
+        resolve_from_workdir() {
+          local path="$1"
+          if [[ "$path" = /* ]]; then
+            printf '%s' "$path"
+          else
+            printf '%s/%s' "$workdir" "$path"
+          fi
+        }
+
+        append_words() {
+          local lines="$1"
+          local line
+          local -a words=()
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            line="$(trim "$line")"
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            read -r -a words <<< "$line"
+            gradle_cmd+=("${words[@]}")
+          done <<< "$lines"
+        }
+
+        append_project_properties() {
+          local lines="$1"
+          local line
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            line="$(trim "$line")"
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            gradle_cmd+=("-P${line}")
+          done <<< "$lines"
+        }
+
+        write_output() {
+          local name="$1"
+          local value="$2"
+          echo "${name}=${value}" >> "$GITHUB_OUTPUT"
+        }
+
+        write_multiline_output() {
+          local name="$1"
+          shift || true
+          if [[ "$#" -eq 0 ]]; then
+            echo "${name}=" >> "$GITHUB_OUTPUT"
+            return 0
+          fi
+
+          local delimiter="EOF_${name}_${RANDOM}_${RANDOM}"
+          {
+            echo "${name}<<${delimiter}"
+            printf '%s\n' "$@"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+        }
+
+        artifact_name="$(trim "$INPUT_ARTIFACT_NAME")"
+        if [[ -z "$artifact_name" ]]; then
+          echo "artifact-name must not be empty" >&2
+          exit 1
+        fi
+        if [[ "$artifact_name" == "." || "$artifact_name" == ".." || "$artifact_name" == */* || "$artifact_name" == *\\* ]]; then
+          echo "artifact-name must be a file name, not a path: $artifact_name" >&2
+          exit 1
+        fi
+
+        workdir="$(resolve_from_workspace "$INPUT_WORKING_DIRECTORY")"
+        if [[ ! -d "$workdir" ]]; then
+          echo "working-directory does not exist: $workdir" >&2
+          exit 1
+        fi
+
+        gradle_executable="$INPUT_GRADLE_WRAPPER"
+        if [[ "$gradle_executable" == */* || "$gradle_executable" == .* ]]; then
+          gradle_executable="$(resolve_from_workdir "$gradle_executable")"
+        fi
+
+        if [[ -f "$gradle_executable" && "$INPUT_CHMOD_GRADLE_WRAPPER" == "true" ]]; then
+          chmod +x "$gradle_executable"
+        fi
+
+        if [[ ! -f "$gradle_executable" ]] && ! command -v "$gradle_executable" >/dev/null 2>&1; then
+          echo "Gradle executable not found: $gradle_executable" >&2
+          exit 1
+        fi
+
+        cd "$workdir"
+
+        if [[ -n "$INPUT_SIGNING_KEYSTORE_BASE64" ]]; then
+          keystore_path="$(resolve_from_workdir "$INPUT_SIGNING_KEYSTORE_PATH")"
+          signing_properties_path="$(resolve_from_workdir "$INPUT_SIGNING_PROPERTIES_PATH")"
+          mkdir -p "$(dirname "$keystore_path")" "$(dirname "$signing_properties_path")"
+
+          printf '%s' "$INPUT_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          {
+            echo "storeFile=$INPUT_SIGNING_KEYSTORE_PATH"
+            echo "storePassword=$INPUT_SIGNING_STORE_PASSWORD"
+            echo "keyAlias=$INPUT_SIGNING_KEY_ALIAS"
+            echo "keyPassword=$INPUT_SIGNING_KEY_PASSWORD"
+          } > "$signing_properties_path"
+        fi
+
+        if [[ -n "$INPUT_PRE_BUILD_COMMAND" ]]; then
+          bash -euo pipefail -c "$INPUT_PRE_BUILD_COMMAND"
+        fi
+
+        gradle_cmd=("$gradle_executable")
+        append_words "$INPUT_GRADLE_ARGS"
+        append_project_properties "$INPUT_PROJECT_PROPERTIES"
+
+        if [[ -n "$INPUT_VERSION_CODE" ]]; then
+          gradle_cmd+=("-PversionCode=${INPUT_VERSION_CODE}")
+        fi
+
+        if [[ -n "$INPUT_VERSION_NAME" ]]; then
+          gradle_cmd+=("-PversionName=${INPUT_VERSION_NAME}")
+        fi
+
+        append_words "$INPUT_GRADLE_TASKS"
+
+        printf 'Running Gradle:'
+        printf ' %q' "${gradle_cmd[@]}"
+        printf '\n'
+        "${gradle_cmd[@]}"
+
+        if [[ -n "$INPUT_POST_BUILD_COMMAND" ]]; then
+          bash -euo pipefail -c "$INPUT_POST_BUILD_COMMAND"
+        fi
+
+        output_dir="$(resolve_from_workspace "$INPUT_OUTPUT_DIR")"
+        artifact_dir="${output_dir}/${artifact_name}"
+        apk_dir="${artifact_dir}/apk"
+        aab_dir="${artifact_dir}/aab"
+
+        rm -rf "$artifact_dir"
+        mkdir -p "$apk_dir" "$aab_dir"
+
+        declare -a apk_paths=()
+        declare -a aab_paths=()
+
+        collect_files() {
+          local kind="$1"
+          local enabled="$2"
+          local globs="$3"
+          local dest_dir="$4"
+          local extension="$5"
+
+          [[ "$enabled" == "true" ]] || return 0
+
+          local line search_pattern src base rel sanitized dest
+          local -a found=()
+          local -a unique=()
+          local -A seen=()
+          shopt -s globstar nullglob
+
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            line="$(trim "$line")"
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            if [[ "$line" = /* ]]; then
+              search_pattern="$line"
+            else
+              search_pattern="${workdir}/${line}"
+            fi
+
+            while IFS= read -r src; do
+              [[ -f "$src" ]] && found+=("$src")
+            done < <(compgen -G "$search_pattern" || true)
+          done <<< "$globs"
+
+          for src in "${found[@]}"; do
+            if [[ -z "${seen[$src]:-}" ]]; then
+              seen["$src"]=1
+              unique+=("$src")
+            fi
+          done
+
+          for src in "${unique[@]}"; do
+            base="$(basename "$src")"
+            if [[ "${#unique[@]}" -eq 1 ]]; then
+              dest="${dest_dir}/${artifact_name}.${extension}"
+            else
+              rel="${src#$workdir/}"
+              sanitized="$(printf '%s' "${rel%.$extension}" | sed -E 's#[/\\]+#-#g; s#[^A-Za-z0-9._-]+#-#g; s#-+#-#g; s#^-|-$##g')"
+              [[ -n "$sanitized" ]] || sanitized="${base%.$extension}"
+              dest="${dest_dir}/${artifact_name}-${sanitized}.${extension}"
+            fi
+
+            cp "$src" "$dest"
+            if [[ "$kind" == "apk" ]]; then
+              apk_paths+=("$dest")
+            else
+              aab_paths+=("$dest")
+            fi
+          done
+        }
+
+        collect_files "apk" "$INPUT_INCLUDE_APK" "$INPUT_APK_GLOBS" "$apk_dir" "apk"
+        collect_files "aab" "$INPUT_INCLUDE_AAB" "$INPUT_AAB_GLOBS" "$aab_dir" "aab"
+
+        artifact_count=$((${#apk_paths[@]} + ${#aab_paths[@]}))
+        if [[ "$artifact_count" -eq 0 && "$INPUT_FAIL_ON_EMPTY" == "true" ]]; then
+          echo "No Android artifacts were collected." >&2
+          exit 1
+        fi
+
+        checksum_path=""
+        case "$INPUT_CHECKSUM" in
+          sha256)
+            if [[ "$artifact_count" -gt 0 ]]; then
+              checksum_path="${artifact_dir}/SHA256SUMS"
+              (
+                cd "$artifact_dir"
+                find . -type f ! -name 'SHA256SUMS' -print0 | sort -z | xargs -0 sha256sum > "$checksum_path"
+              )
+            fi
+            ;;
+          none)
+            ;;
+          *)
+            echo "Unsupported checksum value: $INPUT_CHECKSUM" >&2
+            exit 1
+            ;;
+        esac
+
+        write_output "artifact-name" "$artifact_name"
+        write_output "artifact-dir" "$artifact_dir"
+        write_output "artifact-path" "$artifact_dir"
+        write_output "apk-dir" "$apk_dir"
+        write_output "aab-dir" "$aab_dir"
+        write_output "checksum-path" "$checksum_path"
+        write_multiline_output "apk-paths" "${apk_paths[@]}"
+        write_multiline_output "aab-paths" "${aab_paths[@]}"

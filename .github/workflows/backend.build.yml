@@ -23,117 +23,83 @@ permissions:
   contents: read
   packages: write
 
-env:
-  GO_VERSION_FILE: server/go.mod
-  SERVER_IMAGE: ghcr.io/${{ github.repository_owner }}/lead-server
-
 jobs:
   backend:
-    name: Test and Build
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: server
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            cc: x86_64-linux-gnu-gcc
+            apt-packages: build-essential gcc-x86-64-linux-gnu libc6-dev
+            verify-output: /tmp/check-linux-amd64
+            skip-checks: "false"
+          - goos: linux
+            goarch: arm64
+            cc: aarch64-linux-gnu-gcc
+            apt-packages: build-essential gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+            verify-output: /tmp/check-linux-arm64
+          - goos: windows
+            goarch: amd64
+            cc: x86_64-w64-mingw32-gcc
+            apt-packages: gcc-mingw-w64-x86-64 zip
+            verify-output: /tmp/check-windows-amd64.exe
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: ${{ env.GO_VERSION_FILE }}
-          cache-dependency-path: server/go.sum
+      - id: version
+        name: Resolve Backend version
+        shell: bash
+        run: |
+          version_name="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            version_name="0.0.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "version-name=$version_name" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install C toolchains
+      - name: Install C toolchain
+        env:
+          APT_PACKAGES: ${{ matrix.apt-packages }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            gcc-x86-64-linux-gnu \
-            gcc-aarch64-linux-gnu \
-            gcc-mingw-w64-x86-64 \
-            libc6-dev \
-            libc6-dev-arm64-cross \
-            zip
+          sudo apt-get install -y --no-install-recommends $APT_PACKAGES
 
-      - name: Verify C toolchains
+      - name: Verify C toolchain
         run: |
-          printf '#include <stdlib.h>\nint main(void) { return 0; }\n' | x86_64-linux-gnu-gcc -x c -o /tmp/check-linux-amd64 -
-          printf '#include <stdlib.h>\nint main(void) { return 0; }\n' | aarch64-linux-gnu-gcc -x c -o /tmp/check-linux-arm64 -
-          printf '#include <stdlib.h>\nint main(void) { return 0; }\n' | x86_64-w64-mingw32-gcc -x c -o /tmp/check-windows-amd64.exe -
+          printf '#include <stdlib.h>\nint main(void) { return 0; }\n' \
+            | ${{ matrix.cc }} -x c -o "${{ matrix.verify-output }}" -
 
-      - name: Check formatting
-        run: |
-          files="$(gofmt -l .)"
-          if [ -n "$files" ]; then
-            echo "$files"
-            exit 1
-          fi
+      - id: build
+        name: Build package
+        uses: ./.github/actions/go-cross-build/
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+          working-directory: server
+          package: ./cmd/server
+          binary-name: lead-server
+          goos: ${{ matrix.goos }}
+          goarch: ${{ matrix.goarch }}
+          cgo-enabled: "1"
+          cc: ${{ matrix.cc }}
+          ldflags: "-s -w"
+          skip-checks: ${{ matrix.skip-checks }}
+          output-dir: dist/server
+          package-name: lead-server-${{ steps.version.outputs.version-name }}-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.ref == 'refs/heads/dev' && 'dev' || 'release' }}
+          extra-files: public
 
-      - name: Test
-        run: go test ./...
-
-      - name: Check viewer script
-        run: node --check public/viewer.js
-
-      - name: Build backend binary packages
-        run: |
-          mkdir -p ../dist/server
-
-          build_package() {
-            os="$1"
-            arch="$2"
-            cc="$3"
-            ext="$4"
-            archive_type="$5"
-            package="lead-server-${os}-${arch}"
-            package_dir="../dist/server/${package}"
-
-            mkdir -p "$package_dir"
-            echo "Building ${package} with ${cc}"
-            CGO_ENABLED=1 GOOS="$os" GOARCH="$arch" CC="$cc" \
-              go build -trimpath -ldflags="-s -w" -o "${package_dir}/lead-server${ext}" ./cmd/server
-            cp -R public "$package_dir/public"
-
-            if [ "$archive_type" = "zip" ]; then
-              (cd ../dist/server && zip -qr "${package}.zip" "$package")
-            else
-              (cd ../dist/server && tar -czf "${package}.tar.gz" "$package")
-            fi
-            rm -rf "$package_dir"
-          }
-
-          build_package linux amd64 x86_64-linux-gnu-gcc "" tar
-          build_package linux arm64 aarch64-linux-gnu-gcc "" tar
-          build_package windows amd64 x86_64-w64-mingw32-gcc ".exe" zip
-
-          (
-            cd ../dist/server
-            find . -maxdepth 1 -type f \( -name "*.tar.gz" -o -name "*.zip" \) -print0 \
-              | sort -z \
-              | xargs -0 sha256sum > SHA256SUMS
-          )
-
-      - name: Upload dev backend artifact
-        if: github.ref == 'refs/heads/dev'
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lead-server-dev-binaries
-          path: dist/server/*
-          if-no-files-found: error
-
-      - name: Upload release backend artifact
-        if: github.ref != 'refs/heads/dev'
-        uses: actions/upload-artifact@v4
-        with:
-          name: lead-server-release-binaries
-          path: dist/server/*
+          name: ${{ steps.build.outputs.artifact-name }}
+          path: |
+            ${{ steps.build.outputs.artifact-path }}
+            ${{ steps.build.outputs.sha256-path }}
           if-no-files-found: error
 
   backend-image:
@@ -160,7 +126,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.SERVER_IMAGE }}
+          images: ghcr.io/${{ github.repository_owner }}/lead-server
           tags: |
             type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
             type=ref,event=branch,enable=${{ github.ref != 'refs/heads/dev' }}
@@ -192,8 +158,9 @@ jobs:
       - name: Download backend artifacts
         uses: actions/download-artifact@v4
         with:
-          name: lead-server-release-binaries
+          pattern: lead-server-*
           path: dist/server
+          merge-multiple: true
 
       - name: Publish backend artifacts
         env:

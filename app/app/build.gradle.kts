@@ -1,3 +1,6 @@
+import com.android.build.gradle.internal.api.BaseVariantOutputImpl
+import com.android.build.gradle.internal.tasks.FinalizeBundleTask
+import org.gradle.kotlin.dsl.support.uppercaseFirstChar
 import java.util.Properties
 
 plugins {
@@ -67,6 +70,27 @@ android {
 
     kotlin {
         jvmToolchain(17)
+    }
+
+    applicationVariants.all {
+        val archiveName = providers
+            .gradleProperty("archiveName")
+            .getOrElse(rootProject.name)
+        val packageFileName = "${archiveName}-${defaultConfig.versionName}"
+
+        outputs.all {
+            (this as BaseVariantOutputImpl).outputFileName = "$packageFileName.apk"
+        }
+
+        tasks.named(
+            "sign${flavorName.uppercaseFirstChar()}${buildType.name.uppercaseFirstChar()}Bundle",
+            FinalizeBundleTask::class.java
+        ) {
+            val file = finalBundleFile.asFile.get()
+            val finalFile =
+                File(file.parentFile, "$packageFileName.aab")
+            finalBundleFile.set(finalFile)
+        }
     }
 }
 

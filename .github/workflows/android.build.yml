@@ -22,94 +22,60 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  ANDROID_SERVER_URL: ${{ secrets.ANDROID_SERVER_URL }}
-
 jobs:
   android:
     name: Release Build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: app
-    env:
-      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Make Gradle executable
-        run: chmod +x ./gradlew
-
-      - name: Configure release signing
-        if: env.ANDROID_KEYSTORE_BASE64 != ''
-        run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.keystore
-          {
-            echo "storeFile=release.keystore"
-            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
-            echo "keyAlias=$ANDROID_KEY_ALIAS"
-            echo "keyPassword=$ANDROID_KEY_PASSWORD"
-          } > signing.properties
-
-      - name: Test and build release artifacts
+      - id: version
+        name: Resolve Android version
+        shell: bash
         run: |
           version_name="${GITHUB_REF_NAME#v}"
           if [ "$GITHUB_REF_TYPE" != "tag" ]; then
             version_name="0.0.${GITHUB_RUN_NUMBER}"
           fi
-          ./gradlew --no-daemon \
-            -PscreenShareServerUrl="${ANDROID_SERVER_URL}" \
-            -PversionCode="$GITHUB_RUN_NUMBER" \
-            -PversionName="$version_name" \
-            testReleaseUnitTest lintRelease assembleRelease bundleRelease
+          echo "version-name=$version_name" >> "$GITHUB_OUTPUT"
 
-      - name: Upload dev APK artifact
+      - id: build
+        name: Build Android artifacts
+        uses: ./.github/actions/android-build
+        with:
+          working-directory: app
+          java-version: 17
+          gradle-tasks: |
+            testReleaseUnitTest
+            lintRelease
+            assembleRelease
+            bundleRelease
+          project-properties: |
+            screenShareServerUrl=${{ vars.ANDROID_SERVER_URL }}
+          version-code: ${{ github.run_number }}
+          version-name: ${{ steps.version.outputs.version-name }}
+          artifact-name: lead-android-${{ steps.version.outputs.version-name }}-${{ github.ref == 'refs/heads/dev' && 'dev' || 'release' }}
+          signing-keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          signing-store-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          signing-key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          signing-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Upload APK artifacts
         if: github.ref == 'refs/heads/dev'
         uses: actions/upload-artifact@v4
         with:
-          name: lead-android-dev-apk
-          path: app/app/build/outputs/apk/release/*.apk
+          name: ${{ steps.build.outputs.artifact-name }}
+          path: ${{ steps.build.outputs.apk-dir }}/*.apk
           if-no-files-found: error
 
-      - name: Upload dev AAB artifact
-        if: github.ref == 'refs/heads/dev'
-        uses: actions/upload-artifact@v4
-        with:
-          name: lead-android-dev-aab
-          path: app/app/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
-
-      - name: Upload release APK artifact
+      - name: Upload AAB artifacts
         if: github.ref != 'refs/heads/dev'
         uses: actions/upload-artifact@v4
         with:
-          name: lead-android-release-apk
-          path: app/app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
-
-      - name: Upload release AAB artifact
-        if: github.ref != 'refs/heads/dev'
-        uses: actions/upload-artifact@v4
-        with:
-          name: lead-android-release-aab
-          path: app/app/build/outputs/bundle/release/*.aab
+          name: ${{ steps.build.outputs.artifact-name }}
+          path: ${{ steps.build.outputs.aab-dir }}/*.aab
           if-no-files-found: error
 
   release:
@@ -124,14 +90,9 @@ jobs:
       - name: Download Android artifacts
         uses: actions/download-artifact@v4
         with:
-          name: lead-android-release-apk
-          path: dist/android-apk
-
-      - name: Download Android AAB artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: lead-android-release-aab
-          path: dist/android-aab
+          pattern: lead-android-*
+          path: dist/android
+          merge-multiple: true
 
       - name: Publish Android artifacts
         env:
@@ -139,4 +100,4 @@ jobs:
         run: |
           gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 \
             || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" dist/android-apk/*.apk dist/android-aab/*.aab --clobber
+          gh release upload "$GITHUB_REF_NAME" dist/android/* --clobber
