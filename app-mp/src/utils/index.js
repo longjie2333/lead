@@ -15,3 +15,18 @@ export function encodeQuery(params) {
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     .join("&");
 }
+
+let redirectingPath = ''
+
+export function reLaunchOnce(url) {
+  if (redirectingPath === url) return
+
+  redirectingPath = url
+
+  uni.reLaunch({
+    url,
+    complete: () => {
+      redirectingPath = ''
+    },
+  })
+}

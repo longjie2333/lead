@@ -33,10 +33,6 @@ const title = ref('')
 const viewerUrl = ref('')
 
 onLoad((query) => {
-	if (!userStore.isLoggedIn) {
-		return uni.reLaunch({url: '/pages/login/login'})
-	}
-
 	const deviceId = query.deviceId || ''
 
 	title.value = query.name ? decodeURIComponent(query.name) : '远程控制'

@@ -55,13 +55,11 @@
 import NavBar from '../../components/NavBar.vue'
 import SwipeAction from '../../components/SwipeAction.vue'
 import { ref } from 'vue'
-import { useUserStore } from '../../stores/user'
 import { useDeviceStore } from '../../stores/device'
 import { formatTime } from '../../utils'
 import { onHide, onShow, onUnload, onPullDownRefresh } from '@dcloudio/uni-app'
 import { fetchDevices } from '../../utils/api'
 
-const userStore = useUserStore()
 const deviceStore = useDeviceStore()
 
 const loading = ref(false)
@@ -75,25 +73,25 @@ const deviceSwipeActions = [
 ]
 let refreshTimer = null
 
-if (!userStore.isLoggedIn) {
-	uni.reLaunch({
-		url: '/pages/login/login',
-	})
-}
-
-onShow(startAutoRefresh)
+onShow(() => {
+	refreshDevices()
+	startAutoRefresh()
+})
 onHide(stopAutoRefresh)
 onUnload(stopAutoRefresh)
 
 onPullDownRefresh(async () => {
-	await fetchDevices()
-	uni.stopPullDownRefresh()
+	try {
+		await refreshDevices()
+	} finally {
+		uni.stopPullDownRefresh()
+	}
 })
 
 function startAutoRefresh() {
 	stopAutoRefresh()
 	refreshTimer = setInterval(() => {
-		fetchDevices()
+		refreshDevices()
 	}, 10000)
 }
 
@@ -101,6 +99,26 @@ function stopAutoRefresh() {
 	if (!refreshTimer) return
 	clearInterval(refreshTimer)
 	refreshTimer = null
+}
+
+async function refreshDevices() {
+	if (loading.value) return
+
+	loading.value = true
+
+	try {
+		await fetchDevices()
+		startAutoRefresh()
+	} catch (err) {
+		uni.showToast({
+			title: '刷新设备失败',
+			icon: 'none',
+			duration: 2000,
+		})
+		stopAutoRefresh()
+	} finally {
+		loading.value = false
+	}
 }
 
 function getDeviceId(device) {
@@ -153,7 +171,6 @@ function openRemote(device) {
 		return uni.showToast({
 			title: '请启动该设备的应用',
 			icon: 'none',
-			mask: true,
 			duration: 2000,
 		})
 	}

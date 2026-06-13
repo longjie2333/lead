@@ -2,6 +2,31 @@ import { SERVER_URL } from './config'
 import { useUserStore } from '../stores/user'
 import { useDeviceStore } from '../stores/device'
 
+export class RequestError extends Error {
+  constructor(message, res, path) {
+    super(message)
+
+    if (res.statusCode) this.statusCode = res.statusCode
+    if (res.data) this.resData = res.data
+    if (path) this.path = path
+
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, RequestError);
+    }
+  }
+}
+
+export class UnauthorizedError extends Error {
+  constructor(message) {
+    super(message || 'Unauthorized')
+    this.statusCode = 401
+
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, UnauthorizedError);
+    }
+  }
+}
+
 export async function login({username, password}) {
   const userStore = useUserStore()
   const deviceStore = useDeviceStore()
@@ -116,7 +141,7 @@ export async function deleteUser(id) {
 function requireAuth() {
   const userStore = useUserStore()
 
-  if (!userStore.isLoggedIn) throw new Error('unauthorized')
+  if (!userStore.isLoggedIn) throw new UnauthorizedError()
   return userStore
 }
 
@@ -174,7 +199,14 @@ function request({baseUrl, path, method = 'GET', data, token, allowEmpty = false
           resolve(allowEmpty ? null : res.data || {})
           return
         }
-        reject(new Error(`request failed: ${res.statusCode}`))
+
+        if (res.statusCode === 401 && token) {
+          useUserStore().removeAuth('登录已过期，请重新登录')
+          reject(new UnauthorizedError('登录已过期，请重新登录'))
+          return
+        }
+
+        reject(RequestError('请求失败', res, path))
       },
       fail: (error) => reject(error),
     })

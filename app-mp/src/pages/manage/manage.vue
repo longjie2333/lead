@@ -3,7 +3,7 @@
 		<button
 				class="rounded-xl bg-white flex items-center gap-2"
 				:disabled="loading"
-				@click="doLogout"
+				@click="userStore.removeAuth()"
 		>
 			<view class="text-base">登出</view>
 			<view class="i-lucide-log-out text-xl"></view>
@@ -84,7 +84,7 @@
 			:title="openDrawerMode === 'add' ? '新增用户' : '编辑用户'"
 			show-close
 			show-submit
-			:disable-submit="!canSubmit"
+			:disable-submit="loading || !canSubmit"
 			v-model:open="openDrawer"
 			@submit="handleSubmit"
 			@closed="handleDrawerClosed"
@@ -123,7 +123,7 @@ import SwipeAction from '../../components/SwipeAction.vue'
 import BottomDrawer from '../../components/BottomDrawer.vue'
 import { computed, ref } from 'vue'
 import { useUserStore } from '../../stores/user'
-import { createUser, deleteUser, fetchUsers, logout, updateUser } from '../../utils/api'
+import { createUser, deleteUser, fetchUsers, updateUser } from '../../utils/api'
 import { roleLabel } from '../../utils'
 
 const userStore = useUserStore()
@@ -150,18 +150,12 @@ const userSwipeActions = [
 ]
 
 const canSubmit = computed(() => {
-	if (openDrawerMode === 'add') {
+	if (openDrawerMode.value === 'add') {
 		return newUser.value.username && newUser.value.password
 	}
 
 	return newUser.value.username
 })
-
-if (!userStore.isLoggedIn) {
-	uni.reLaunch({
-		url: '/pages/login/login',
-	})
-}
 
 if (userStore.user.isAdmin) {
 	loadUsers()
@@ -226,15 +220,6 @@ async function resetPassword() {
 	}
 }
 
-async function doLogout() {
-	await logout()
-
-	uni.clearStorageSync()
-	uni.reLaunch({
-		url: '/pages/login/login',
-	})
-}
-
 function doAddUser() {
 	openDrawer.value = true
 	openDrawerMode.value = 'add'
@@ -248,7 +233,15 @@ function doEditUser(user) {
 }
 
 async function loadUsers() {
-	users.value = await fetchUsers()
+	try {
+		users.value = await fetchUsers()
+	} catch (err) {
+		uni.showToast({
+			title: '用户列表加载失败',
+			icon: 'none',
+			duration: 2000,
+		})
+	}
 }
 
 function setUserSwipeOpen(user, open) {
@@ -264,6 +257,8 @@ function setUserSwipeOpen(user, open) {
 async function handleUserSwipeAction(user, action) {
 	switch (action.key) {
 		case 'delete':
+			if (loading.value) return
+
 			if (userStore.user.id === user.id) {
 				uni.showToast({
 					title: '无法删除自己',
@@ -282,41 +277,47 @@ async function handleUserSwipeAction(user, action) {
 				return
 			}
 
-			await deleteUser(user.id)
-			await loadUsers()
+			loading.value = true
+			try {
+				await deleteUser(user.id)
+				await loadUsers()
+			} catch (err) {
+				uni.showToast({
+					title: '删除失败',
+					icon: 'none',
+					duration: 2000,
+				})
+			} finally {
+				loading.value = false
+				openSwipeId.value = ''
+			}
 			break
 	}
 }
 
 async function handleSubmit() {
-	if (openDrawerMode.value === 'add') {
-		try {
-			await createUser(newUser.value)
-			await loadUsers()
+	if (loading.value) return
 
-			openDrawer.value = false
-		} catch (err) {
-			uni.showToast({
-				title: '新增失败',
-				icon: 'none',
-				duration: 2000,
-			})
-		}
-
-		return
-	}
+	loading.value = true
 
 	try {
-		await updateUser(newUser.value)
+		if (openDrawerMode.value === 'add') {
+			await createUser(newUser.value)
+		} else {
+			await updateUser(newUser.value)
+		}
+
 		await loadUsers()
 
 		openDrawer.value = false
 	} catch (err) {
 		uni.showToast({
-			title: '更新失败',
+			title: openDrawerMode.value === 'add' ? '新增失败' : '更新失败',
 			icon: 'none',
 			duration: 2000,
 		})
+	} finally {
+		loading.value = false
 	}
 }
 

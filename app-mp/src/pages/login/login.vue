@@ -29,20 +29,11 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useUserStore } from '../../stores/user'
 import { login } from '../../utils/api'
-
-const userStore = useUserStore()
 
 const username = ref('')
 const password = ref('')
 const loading = ref(false)
-
-if (userStore.isLoggedIn) {
-	uni.reLaunch({
-		url: '/pages/devices/devices',
-	})
-}
 
 async function submit() {
 	if (loading.value) return
