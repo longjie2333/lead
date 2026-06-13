@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  lead-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lead-server:latest
+    container_name: lead-server
+    restart: unless-stopped
+
+    ports:
+      # HTTP API, WebSocket 信令和静态资源服务
+      - "8787:8787"
+
+      # TURN UDP 入口端口
+      - "3478:3478/udp"
+
+      # TURN relay 媒体转发端口范围
+      # 生产环境建议固定端口范围并在防火墙放行
+      - "50000-50100:50000-50100/udp"
+
+    environment:
+      # TURN 服务配置
+      # 公网部署时必须设置为服务器的公网 IP
+      # 局域网测试时设置为局域网 IP
+      TURN_PUBLIC_IP: ${TURN_PUBLIC_IP:-127.0.0.1}
+      TURN_LISTEN_ADDR: "0.0.0.0"
+      TURN_PORT: "3478"
+      TURN_REALM: "lead.remoteassist"
+      TURN_USERNAME: ${TURN_USERNAME:-lead}
+      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-leadpass}
+
+      # TURN relay 端口范围
+      # 设置端口范围可以精确控制防火墙规则
+      # 设为 0 表示不限制，系统随机分配
+      TURN_MIN_PORT: "50000"
+      TURN_MAX_PORT: "50100"
+
+      # HTTP 服务配置
+      HTTP_ADDR: "0.0.0.0"
+      PORT: "8787"
+
+      # 鉴权数据库路径
+      # 持久化到 data 目录以便容器重启后保留数据
+      AUTH_DB_PATH: "/app/data/auth.db"
+
+      # 默认管理员密码
+      # 生产环境务必修改此密码
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+
+      # 可选：自定义 ICE servers JSON
+      # 留空使用默认配置 (Google STUN + 内置 TURN)
+      # ICE_SERVERS_JSON: '[{"urls":"stun:stun.example.com:19302"},{"urls":"turn:turn.example.com:3478","username":"user","credential":"pass"}]'
+
+      # 可选：SFU 模式配置
+      # 配置后客户端将使用 SFU 中转而非内置 TURN
+      # SFU_URL: "wss://sfu.example.com/ws"
+
+    volumes:
+      # 持久化数据目录
+      # 包含 SQLite 数据库文件 (auth.db)
+      - ./data:/app/data
+
+      # 可选：挂载自定义 viewer 静态资源
+      # - ./public:/app/public:ro
+
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8787/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # 资源限制 (可选)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2.0'
+    #       memory: 1G
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 256M
+
+    # 网络模式
+    # 使用 host 模式可以避免 NAT 问题，但会失去端口隔离
+    # network_mode: "host"
+
+# 可选：自定义网络配置
+# networks:
+#   lead-network:
+#     driver: bridge
+#     ipam:
+#       config:
+#         - subnet: 172.20.0.0/16
+
+# 可选：使用外部镜像而非本地构建
+# 将 build 部分替换为:
+# image: ghcr.io/longjie2333/lead-server:latest
