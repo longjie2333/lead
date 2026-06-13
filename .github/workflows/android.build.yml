@@ -63,7 +63,6 @@ jobs:
           signing-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Upload APK artifacts
-        if: github.ref == 'refs/heads/dev'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.build.outputs.artifact-name }}
@@ -71,7 +70,6 @@ jobs:
           if-no-files-found: error
 
       - name: Upload AAB artifacts
-        if: github.ref != 'refs/heads/dev'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.build.outputs.artifact-name }}
