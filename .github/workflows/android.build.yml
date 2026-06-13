@@ -65,14 +65,14 @@ jobs:
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.build.outputs.artifact-name }}
+          name: ${{ steps.build.outputs.artifact-name }}-apk
           path: ${{ steps.build.outputs.apk-dir }}/*.apk
           if-no-files-found: error
 
       - name: Upload AAB artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.build.outputs.artifact-name }}
+          name: ${{ steps.build.outputs.artifact-name }}-aab
           path: ${{ steps.build.outputs.aab-dir }}/*.aab
           if-no-files-found: error
 
