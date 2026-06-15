@@ -97,6 +97,19 @@ class RemoteControlAccessibilityService : AccessibilityService() {
 
         fun isRunning(): Boolean = instance != null
 
+        fun disableRemoteControl(callback: (Boolean) -> Unit) {
+            mainHandler.post {
+                val service = instance
+                if (service == null) {
+                    callback(false)
+                    return@post
+                }
+                service.disableSelf()
+                if (instance === service) instance = null
+                callback(true)
+            }
+        }
+
         fun perform(action: String, payload: Map<String, Double> = emptyMap(), durationMs: Long = 120L, callback: (Boolean) -> Unit) {
             mainHandler.post {
                 val service = instance

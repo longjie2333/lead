@@ -125,6 +125,21 @@ class MainActivity : ComponentActivity() {
                 projectionLauncher.launch(captureIntent)
             }
 
+            fun stopAssistance() {
+                ScreenShareState.isSharing = false
+                projectionGranted = false
+                stopService(Intent(this, ScreenShareService::class.java))
+            }
+
+            fun stopRemoteControl() {
+                RemoteControlAccessibilityService.disableRemoteControl { disabled ->
+                    controlEnabled = if (disabled) false else isRemoteControlEnabled()
+                    if (!disabled) {
+                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    }
+                }
+            }
+
             fun login() {
                 if (isLoggingIn) return
                 if (username.isBlank() || password.isBlank()) {
@@ -146,7 +161,6 @@ class MainActivity : ComponentActivity() {
                             savedAuth = AuthStore.load(this)
                             password = ""
                             dialogMessage = ""
-                            startPermissionRequestService()
                         }.onFailure {
                             dialogMessage = "登录失败：${it.message ?: "请检查账号密码或网络连接"}"
                         }
@@ -170,7 +184,6 @@ class MainActivity : ComponentActivity() {
                         if (intent.action == ScreenShareService.ACTION_SHARE_STOPPED) {
                             ScreenShareState.isSharing = false
                             projectionGranted = false
-                            if (savedAuth != null) startPermissionRequestService()
                         }
                     }
                 }
@@ -266,7 +279,9 @@ class MainActivity : ComponentActivity() {
                                     colors = ButtonDefaults.buttonColorsPrimary(),
                                     minWidth = 200.dp,
                                     minHeight = 120.dp,
-                                    onClick = { requestProjectionPermission() }
+                                    onClick = {
+                                        if (projectionGranted) stopAssistance() else requestProjectionPermission()
+                                    }
                                 ) {
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally
@@ -274,12 +289,12 @@ class MainActivity : ComponentActivity() {
                                         if (projectionGranted) {
                                             Icon(
                                                 imageVector = MiuixIcons.Replace,
-                                                contentDescription = "ReStart",
+                                                contentDescription = "Stop",
                                                 modifier = Modifier.size(32.dp)
                                             )
                                             Spacer(Modifier.height(10.dp))
                                             Text(
-                                                text = "重新授权协助",
+                                                text = "结束协助",
                                                 fontSize = 20.sp
                                             )
                                         } else {
@@ -302,10 +317,11 @@ class MainActivity : ComponentActivity() {
                                     minHeight = 60.dp,
                                     enabled = projectionGranted,
                                     onClick = {
-                                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                        if (controlEnabled) stopRemoteControl()
+                                        else startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                                     },
                                 ) {
-                                    Text(text = if (controlEnabled) "已允许对方控制" else "允许控制")
+                                    Text(text = if (controlEnabled) "取消控制" else "允许控制")
                                 }
                             }
                         }
