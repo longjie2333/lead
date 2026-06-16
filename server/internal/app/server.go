@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -30,12 +31,20 @@ func StartHTTPServer(cfg config.Config, publicIP string) (*http.Server, error) {
 	authService.RegisterRoutes(router.Group("/api"))
 	router.GET("/ws", gin.WrapH(hub))
 	publicDir := StaticPublicDir()
-	router.GET("/viewer", func(c *gin.Context) {
+	router.GET("/", func(c *gin.Context) {
 		c.File(filepath.Join(publicDir, "index.html"))
 	})
-	router.StaticFS("/viewer", http.Dir(publicDir))
-	router.GET("/", func(c *gin.Context) {
-		c.String(http.StatusOK, "Hello")
+	router.StaticFS("/assets", http.Dir(filepath.Join(publicDir, "assets")))
+	router.NoRoute(func(c *gin.Context) {
+		if c.Request.Method != http.MethodGet {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") || c.Request.URL.Path == "/api" {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.File(filepath.Join(publicDir, "index.html"))
 	})
 
 	addr := net.JoinHostPort(cfg.HTTP.Addr, strconv.Itoa(cfg.HTTP.Port))

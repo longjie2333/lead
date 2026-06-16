@@ -164,11 +164,14 @@ func TestHTTPServerServesGinRoutes(t *testing.T) {
 
 	baseURL := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	waitForHTTP(t, baseURL+"/")
-	if status := getStatus(t, baseURL+"/viewer", ""); status != http.StatusOK {
-		t.Fatalf("viewer status = %d, want %d", status, http.StatusOK)
+	if status := getStatus(t, baseURL+"/", ""); status != http.StatusOK {
+		t.Fatalf("web app status = %d, want %d", status, http.StatusOK)
 	}
-	if status := getStatus(t, baseURL+"/viewer/viewer.js", ""); status != http.StatusOK {
-		t.Fatalf("viewer asset status = %d, want %d", status, http.StatusOK)
+	if status := getStatus(t, baseURL+"/devices", ""); status != http.StatusOK {
+		t.Fatalf("spa fallback status = %d, want %d", status, http.StatusOK)
+	}
+	if status := getStatus(t, baseURL+"/api/missing", ""); status != http.StatusNotFound {
+		t.Fatalf("missing api status = %d, want %d", status, http.StatusNotFound)
 	}
 	login := postJSON(t, baseURL+"/api/login", map[string]any{
 		"username": "admin",

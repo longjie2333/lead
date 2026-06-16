@@ -1,0 +1,63 @@
+name: Web Build
+description: Build the Vue web client into the server public directory.
+
+inputs:
+  working-directory:
+    description: Web project directory, relative to GITHUB_WORKSPACE.
+    required: false
+    default: server-web
+  node-version:
+    description: Node.js version passed to actions/setup-node.
+    required: false
+    default: "20"
+  cache-dependency-path:
+    description: Lock file path used by setup-node cache.
+    required: false
+    default: server-web/package-lock.json
+  build-command:
+    description: Build command executed in working-directory.
+    required: false
+    default: npm run build
+  output-dir:
+    description: Expected generated static asset directory, relative to GITHUB_WORKSPACE.
+    required: false
+    default: server/public
+
+outputs:
+  output-dir:
+    description: Absolute path to the generated static asset directory.
+    value: ${{ steps.build.outputs.output-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+        cache-dependency-path: ${{ inputs.cache-dependency-path }}
+
+    - id: build
+      name: Build web assets
+      shell: bash
+      env:
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        INPUT_BUILD_COMMAND: ${{ inputs.build-command }}
+        INPUT_OUTPUT_DIR: ${{ inputs.output-dir }}
+      run: |
+        set -euo pipefail
+
+        workdir="${GITHUB_WORKSPACE}/${INPUT_WORKING_DIRECTORY}"
+        output_dir="${GITHUB_WORKSPACE}/${INPUT_OUTPUT_DIR}"
+
+        cd "$workdir"
+        npm ci
+        $INPUT_BUILD_COMMAND
+
+        if [[ ! -f "${output_dir}/index.html" ]]; then
+          echo "Web build output is missing index.html: ${output_dir}" >&2
+          exit 1
+        fi
+
+        echo "output-dir=${output_dir}" >> "$GITHUB_OUTPUT"

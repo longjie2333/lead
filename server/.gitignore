@@ -3,6 +3,7 @@ lead-turn-server
 lead-turn-server.exe
 *.test
 *.out
+public/**
 
 # Runtime data
 data/

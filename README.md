@@ -1,8 +1,8 @@
 # Lead 远程协助项目
 
-一个完整的远程屏幕协助解决方案，旨在通过 WebRTC 技术实现 Android 设备的实时屏幕共享与远程控制。项目由 Go 后端服务、Android 原生应用和微信小程序三部分组成，后端集成了 WebSocket 信令服务和 TURN 中继服务，支持 P2P 直连和服务端中转两种传输模式，确保在各种网络环境下都能稳定工作。
+一个完整的远程屏幕协助解决方案，旨在通过 WebRTC 技术实现 Android 设备的实时屏幕共享与远程控制。项目由 Go 后端服务、Android 原生应用和 Web 端三部分组成，后端集成了 WebSocket 信令服务和 TURN 中继服务，支持 P2P 直连和服务端中转两种传输模式，确保在各种网络环境下都能稳定工作。
 
-整个项目基于 WebRTC 实现了低延迟的音视频传输，后端使用 Gin 框架提供 RESTful API 和 WebSocket 信令通道，集成 Pion TURN 库提供 NAT 穿透能力，使用 SQLite 持久化用户和设备数据。Android 端采用 Kotlin + Jetpack Compose 构建现代化 UI，通过 MediaProjection 捕获屏幕内容，使用 Accessibility Service 实现远程控制，利用 WebRTC Android SDK 完成音视频编码和传输。微信小程序基于 uni-app 框架开发，可快速适配多端小程序平台，通过 Web viewer 页面实现远程屏幕的实时查看和控制操作。
+整个项目基于 WebRTC 实现了低延迟的视频传输，后端使用 Gin 框架提供 RESTful API 和 WebSocket 信令通道，集成 Pion TURN 库提供 NAT 穿透能力，使用 SQLite 持久化用户和设备数据。Android 端采用 Kotlin + Jetpack Compose 构建现代化 UI，通过 MediaProjection 捕获屏幕内容，使用 Accessibility Service 实现远程控制，利用 WebRTC Android SDK 完成视频编码和传输。Web 端基于 Vue3 + Vite + Pinia + Tailwind CSS 开发，提供设备列表、远程控制和用户管理页面；生产构建产物写入 `server/public`，由 Go 服务直接托管。
 
 ## 技术选型
 
@@ -10,7 +10,7 @@
 | ---------------- | -------- | ------------------------------------------- |
 | **后端服务**     | server/  | Go + Gin + WebSocket + SQLite3 + Pion Turn  |
 | **Android 应用** | app/     | Kotlin + Miuix + WebRTC + OkHttp            |
-| **微信小程序**   | app-mp/  | uni-app + Vue3 + Vite + Pina + Tailwind CSS |
+| **Web 端**       | server-web/ | Vue3 + Vite + Pinia + Tailwind CSS         |
 
 ## 快速开始
 
@@ -21,7 +21,7 @@
 - **Android 应用**
     - JDK 17
     - Android SDK API 26-36
-- **微信小程序**
+- **Web 端**
     - Node.js 18.x 或更高版本
     - npm
 
@@ -52,7 +52,7 @@ go run ./cmd/server
 ```
 
 服务启动后：
-- Web viewer 页面：http://localhost:8787/viewer
+- HTTP API 和 WebSocket 信令：http://localhost:8787/
 - WebSocket 信令：ws://localhost:8787/ws
 - Android 连接地址：ws://192.168.1.20:8787/ws (局域网测试)
 
@@ -85,25 +85,22 @@ screenShareServerUrl=ws://192.168.1.20:8787/ws
 ./gradlew assembleDebug -PscreenShareServerUrl=ws://192.168.1.20:8787/ws
 ```
 
-**微信小程序**
+**Web 端**
 
-进入小程序目录并安装依赖：
+进入 Web 端目录并安装依赖：
 
 ```bash
-cd app-mp
-npm install
+cd server-web
+npm ci
 
-# 开发微信小程序
-npm run dev:mp-weixin
+# 开发 Web 端
+npm run dev
 
-# 开发 H5 版本
-npm run dev:h5
-
-# 构建生产版本
-npm run build:mp-weixin
+# 构建到 server/public
+npm run build
 ```
 
-使用微信开发者工具打开 `app-mp/dist/dev/mp-weixin` 目录进行调试。
+开发服务默认运行在 http://localhost:5173/，并把 `/api` 和 `/ws` 代理到本地后端 `127.0.0.1:8787`。生产构建产物会写入 `server/public`，线上由 Go 服务在 http://localhost:8787/ 直接托管。
 
 ### 后端部署
 
@@ -112,8 +109,12 @@ npm run build:mp-weixin
 最简单的部署方式是使用 Docker Compose：
 
 ```bash
+cd server-web
+npm ci
+npm run build
+
 cd server
-docker-compose up -d
+docker-compose up -d --build
 ```
 
 配置文件位于 `server/docker-compose.yml`，默认配置：
@@ -242,9 +243,9 @@ CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -o lead-
 | --------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | **对应文件**    | `.github/workflows/android.build.yml`                        | `.github/workflows/backend.build.yml`                        |
 | **触发条件**    | - Push 到 dev/main/master 分支<br />- Pull Request 到 dev/main/master 分支<br />- 创建 v* 版本标签<br />- 手动触发 | 与左边相同                                                   |
-| **构建目标**    | - APK<br />- AAB                                             | - Linux x64<br />- Linux ARM64<br />- Windows x64            |
+| **构建目标**    | - APK<br />- AAB                                             | - Web 静态资源<br />- Linux x64<br />- Linux ARM64<br />- Windows x64 |
 | **Docker 镜像** | *无*                                                         | 自动构建并推送到 GitHub Container Registry (ghcr.io)：<br />- dev 分支 → `ghcr.io/longjie2333/lead-server:dev`<br/>- 其他分支 → `ghcr.io/longjie2333/lead-server:<branch-name>`<br/>- 版本标签 → `ghcr.io/longjie2333/lead-server:<tag-name>` |
-| **自动发布**    | 标签构建时自动创建 GitHub Release 并上传 APK/AAB 文件        | 标签构建时自动创建 GitHub Release，上传所有平台的二进制包和 SHA256 校验文件。 |
+| **自动发布**    | 标签构建时自动创建 GitHub Release 并上传 APK/AAB 文件        | 标签构建时自动创建 GitHub Release，上传包含 Web 端静态资源的服务端二进制包和 SHA256 校验文件。 |
 
 ### Android 构建配置
 
@@ -271,6 +272,10 @@ base64 -w 0 release.keystore > release.keystore.base64
 
 将 `release.keystore.base64` 文件内容复制到 GitHub Secrets 的 `ANDROID_KEYSTORE_BASE64` 中。
 
+### 后端与 Web 构建配置
+
+后端 workflow 会先调用 `.github/actions/web-build` 执行 `server-web` 的 `npm ci` 和 `npm run build`，生成 `server/public` 后再调用 `.github/actions/go-cross-build` 打包服务端。Docker 镜像构建前也会执行同一个 Web 构建 action，确保镜像内包含最新 Web 端页面。
+
 ### 本地测试 CI 构建
 
 **测试 Android 构建**
@@ -286,6 +291,10 @@ export SCREEN_SHARE_SERVER_URL=ws://test.example.com:8787/ws
 **测试后端构建**
 
 ```bash
+cd server-web
+npm ci
+npm run build
+
 cd server
 # 构建 Linux x64
 CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/lead-server ./cmd/server
@@ -306,7 +315,7 @@ lead/
 │   │   ├── config/           # 配置加载
 │   │   ├── signaling/        # WebSocket 信令转发
 │   │   └── turnserver/       # TURN 中继服务
-│   ├── public/               # viewer 静态资源
+│   ├── public/               # server-web 构建产物，已忽略提交
 │   ├── data/                 # SQLite 数据目录
 │   ├── Dockerfile            # Docker 镜像构建
 │   ├── docker-compose.yml    # Docker Compose 配置
@@ -318,9 +327,8 @@ lead/
 │   ├── gradle/               # Gradle wrapper
 │   ├── signing.properties    # 签名配置 (需自行创建)
 │   └── build.gradle.kts      # 项目构建配置
-├── app-mp/                   # 微信小程序
+├── server-web/               # Web 端
 │   ├── src/                  # 源代码
-│   ├── dist/                 # 构建输出
 │   ├── package.json          # npm 配置
 │   └── vite.config.js        # Vite 构建配置
 └── .github/                  # GitHub Actions
@@ -329,5 +337,6 @@ lead/
     │   └── backend.build.yml # 后端构建
     └── actions/              # 可复用 actions
         ├── android-build/    # Android 构建封装
-        └── go-cross-build/   # Go 交叉编译封装
+        ├── go-cross-build/   # Go 交叉编译封装
+        └── web-build/        # Web 端构建封装
 ```

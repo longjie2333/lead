@@ -52,6 +52,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Build web assets
+        uses: ./.github/actions/web-build
+
       - id: version
         name: Resolve Backend version
         shell: bash
@@ -111,6 +114,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Build web assets
+        uses: ./.github/actions/web-build
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

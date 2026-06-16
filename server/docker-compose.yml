@@ -62,7 +62,7 @@ services:
       # 包含 SQLite 数据库文件 (auth.db)
       - ./data:/app/data
 
-      # 可选：挂载自定义 viewer 静态资源
+      # 可选：挂载自定义 Web 端静态资源
       # - ./public:/app/public:ro
 
     # 健康检查

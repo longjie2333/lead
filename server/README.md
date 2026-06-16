@@ -1,6 +1,6 @@
 # Lead 远程协助后端
 
-这是 Lead 远程协助项目的 Go 后端。当前后端把静态 viewer 页面、登录鉴权、设备列表、WebSocket 信令和内置 TURN 服务封装在同一个进程中，前端只需要访问静态页面并通过后端提供的 API 与信令通道工作。
+这是 Lead 远程协助项目的 Go 后端。当前后端把静态 Web 端页面、登录鉴权、设备列表、WebSocket 信令和内置 TURN 服务封装在同一个进程中，前端只需要访问静态页面并通过后端提供的 API 与信令通道工作。
 
 ## 快速运行
 
@@ -8,6 +8,15 @@
 
 ```powershell
 cd server
+```
+
+如果需要通过 Go 服务访问 Web 页面，先构建 Web 端静态资源：
+
+```powershell
+cd ..\server-web
+npm ci
+npm run build
+cd ..\server
 ```
 
 本地运行：
@@ -30,7 +39,7 @@ go run ./cmd/server
 启动后访问：
 
 ```text
-http://localhost:8787/viewer
+http://localhost:8787/
 ```
 
 Android 端连接同一后端：
@@ -45,11 +54,22 @@ ws://192.168.1.20:8787/ws
 go test ./...
 ```
 
-检查 viewer 脚本语法：
+构建 Web 端：
 
 ```powershell
-node --check public/viewer.js
+cd ..\server-web
+npm ci
+npm run build
 ```
+
+开发 Web 端时可直接运行 Vite：
+
+```powershell
+cd ..\server-web
+npm run dev
+```
+
+Vite 开发服务默认运行在 `http://localhost:5173/`，并代理 `/api` 和 `/ws` 到 `127.0.0.1:8787`。
 
 ## 配置说明
 
@@ -97,7 +117,7 @@ $env:TURN_MAX_PORT="50100"
 
 | 协议 | 端口 | 用途 |
 | --- | --- | --- |
-| TCP | `8787` | viewer 静态页面、HTTP API、WebSocket 信令。 |
+| TCP | `8787` | Web 端静态资源、HTTP API、WebSocket 信令。 |
 | UDP | `3478` | TURN 入口端口。 |
 | UDP | `TURN_MIN_PORT..TURN_MAX_PORT` | TURN relay 媒体转发端口，设置端口范围时需要放行。 |
 
@@ -113,7 +133,7 @@ server/
   internal/config/         统一环境变量和命令行参数配置入口
   internal/signaling/      WebSocket 信令转发、ICE 配置下发、viewer/android 会话管理
   internal/turnserver/     内置 TURN UDP relay 服务
-  public/                  viewer 静态页面资源
+  public/                  server-web 构建产物，已忽略提交
   data/                    默认 SQLite 数据目录
 ```
 
@@ -121,7 +141,7 @@ server/
 
 | 模块 | 文件 | 职责 |
 | --- | --- | --- |
-| HTTP 静态服务 | `internal/app` | 通过 `/viewer` 提供 `public/index.html`，通过 `/viewer/*` 提供 JS/CSS 等静态资源，并挂载 `/api/*` 和 `/ws`。 |
+| HTTP 静态服务 | `internal/app` | 通过 `/` 提供 `public/index.html`，通过 `/assets/*` 提供 JS/CSS 等静态资源；任意非 `/api` 的 GET 路径回退到 SPA，并挂载 `/api/*` 和 `/ws`。 |
 | 鉴权服务 | `internal/auth` | 处理登录、退出、设备列表；维护用户、token 与设备绑定；使用 SQLite 持久化。 |
 | 信令中心 | `internal/signaling` | Android 与 viewer 通过同一个 `/ws` 建立 WebSocket，后端按 `deviceId` 转发 WebRTC offer/answer/ICE/control 消息。 |
 | TURN 服务 | `internal/turnserver` | 基于 Pion TURN 提供 UDP relay，供 WebRTC P2P 失败时中转媒体流量。 |
@@ -149,9 +169,9 @@ server/data/auth.db
 
 | 方式 | 接口 | 参数 | 返回 |
 | --- | --- | --- | --- |
-| `GET` | `/` | 无 | 文本 `Hello`，可作为简单健康检查。 |
-| `GET` | `/viewer` | 可选 query：`token`、`deviceId` | viewer 页面 `index.html`。 |
-| `GET` | `/viewer/{file}` | 路径参数：静态资源文件名，例如 `viewer.js`、`style.css` | 对应静态资源文件。 |
+| `GET` | `/` | 可选 query：`token`、`deviceId` | Web SPA `index.html`。 |
+| `GET` | `/assets/{file}` | 路径参数：Vite 构建后的静态资源文件 | 对应静态资源文件。 |
+| `GET` | `/{client-route}` | 任意非 `/api` GET 路径 | Web SPA `index.html`。 |
 | `POST` | `/api/login` | JSON：`username`、`password`、`source`；Android 端还可传 `deviceId`、`deviceName` | JSON：`token`、`user`、`devices`；Android 登录时额外返回 `device`。 |
 | `POST` | `/api/logout` | Header：`Authorization: Bearer <token>`，或 query：`token` | `204 No Content`。 |
 | `GET` | `/api/devices` | Header：`Authorization: Bearer <token>`，或 query：`token` | JSON：`{"devices":[...]}`。 |
@@ -260,7 +280,7 @@ server/data/auth.db
 | --- | --- | --- |
 | Android 推流端 | `{"type":"hello","role":"android","deviceId":"device-1", ...}` | 注册为当前设备的活跃推流端，向 viewer 广播 `stream-info`，并下发 `iceServers`、`relayMode`、`sfuUrl`。 |
 | Android 等待端 | `{"type":"hello","role":"android-waiting","deviceId":"device-1"}` | 注册为等待远控请求的设备端；当 viewer 加入时收到 `remote-request`。 |
-| Web viewer | `{"type":"hello","role":"viewer","deviceId":"device-1"}` | 注册为 viewer；如果 Android 在线则通知 Android `viewer-joined`，否则返回 `waiting`。 |
+| Web client | `{"type":"hello","role":"viewer","deviceId":"device-1"}` | 注册为 viewer；如果 Android 在线则通知 Android `viewer-joined`，否则返回 `waiting`。 |
 
 常见信令消息：
 
@@ -275,10 +295,10 @@ server/data/auth.db
 | server -> viewer | `waiting` | 附带 `iceServers`、`relayMode`、`sfuUrl` | 表示目标 Android 当前未进入推流会话。 |
 | server -> client | `config` | `iceServers`、`relayMode`、`sfuUrl` | 下发 WebRTC 连接配置。 |
 
-viewer 直达指定设备的访问方式：
+Web client 直达指定设备的访问方式：
 
 ```text
-http://localhost:8787/viewer?token=<token>&deviceId=<deviceId>
+http://localhost:8787/?token=<token>&deviceId=<deviceId>
 ```
 
 对应 WebSocket 地址：
@@ -289,14 +309,14 @@ ws://localhost:8787/ws?token=<token>&deviceId=<deviceId>
 
 ## 整体运行流程
 
-下面使用 Mermaid 绘图公式描述后端、Android 端和 Web viewer 的整体协作流程：
+下面使用 Mermaid 绘图公式描述后端、Android 端和 Web client 的整体协作流程：
 
 ```mermaid
 flowchart TD
     A["启动 Go 后端"] --> B["加载配置: 环境变量 + 命令行参数"]
     B --> C["启动内置 TURN UDP 服务"]
     B --> D["启动 Gin HTTP 服务"]
-    D --> E["挂载静态页面: /viewer 和 /viewer/*"]
+    D --> E["挂载静态页面: / 和 /assets/*"]
     D --> F["挂载鉴权接口: /api/login /api/logout /api/devices"]
     D --> G["挂载 WebSocket 信令: /ws"]
 
@@ -306,7 +326,7 @@ flowchart TD
     K -->|等待远控| L["发送 hello: role=android-waiting"]
     K -->|开始推流| M["发送 hello: role=android"]
 
-    N["Web viewer 打开 /viewer"] --> O{"是否已有 token 和 deviceId"}
+    N["Web client 打开 /"] --> O{"是否已有 token 和 deviceId"}
     O -->|没有| P["登录 /api/login<br/>source=viewer"]
     P --> Q["请求 /api/devices<br/>选择设备"]
     O -->|已有| R["直接连接 /ws"]
@@ -350,7 +370,7 @@ flowchart TD
 sequenceDiagram
     participant Android as Android 应用
     participant Server as Go 后端
-    participant Viewer as Web viewer
+    participant Viewer as Web client
     participant Relay as STUN/TURN/SFU
 
     Android->>Server: POST /api/login source=android
@@ -358,7 +378,7 @@ sequenceDiagram
     Android->>Server: WS /ws?token=...&deviceId=...
     Android->>Server: hello role=android-waiting
 
-    Viewer->>Server: GET /viewer
+    Viewer->>Server: GET /
     Viewer->>Server: POST /api/login source=viewer
     Server-->>Viewer: token + devices
     Viewer->>Server: WS /ws?token=...&deviceId=...

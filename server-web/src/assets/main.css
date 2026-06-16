@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f7f7f7;
+  color: #10151d;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overscroll-behavior: none;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.status-pill {
+  min-width: 48px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  padding: 4px 10px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.status-pill.online {
+  background: #eaf8ef;
+  color: #1d7c45;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
