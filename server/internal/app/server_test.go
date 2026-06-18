@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -169,6 +170,15 @@ func TestHTTPServerServesGinRoutes(t *testing.T) {
 	}
 	if status := getStatus(t, baseURL+"/devices", ""); status != http.StatusOK {
 		t.Fatalf("spa fallback status = %d, want %d", status, http.StatusOK)
+	}
+	if contentType := getHeader(t, baseURL+"/lead-sw.js", "", "Content-Type"); !strings.Contains(contentType, "javascript") {
+		t.Fatalf("lead-sw.js content type = %q, want javascript", contentType)
+	}
+	if cacheControl := getHeader(t, baseURL+"/lead-sw.js", "", "Cache-Control"); !strings.Contains(cacheControl, "no-store") {
+		t.Fatalf("lead-sw.js cache control = %q, want no-store", cacheControl)
+	}
+	if contentType := getHeader(t, baseURL+"/manifest.webmanifest", "", "Content-Type"); !strings.Contains(contentType, "application/manifest+json") {
+		t.Fatalf("manifest.webmanifest content type = %q, want application/manifest+json", contentType)
 	}
 	if status := getStatus(t, baseURL+"/api/missing", ""); status != http.StatusNotFound {
 		t.Fatalf("missing api status = %d, want %d", status, http.StatusNotFound)
@@ -548,6 +558,26 @@ func getStatus(t *testing.T, rawURL string, token string) int {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode
+}
+
+func getHeader(t *testing.T, rawURL string, token string, name string) string {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get header: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	return resp.Header.Get(name)
 }
 
 func waitForHTTP(t *testing.T, rawURL string) {

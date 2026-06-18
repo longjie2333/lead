@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -32,7 +33,9 @@ func StartHTTPServer(cfg config.Config, publicIP string) (*http.Server, error) {
 	router.GET("/ws", gin.WrapH(hub))
 	publicDir := StaticPublicDir()
 	router.GET("/", func(c *gin.Context) {
-		c.File(filepath.Join(publicDir, "index.html"))
+		indexPath := filepath.Join(publicDir, "index.html")
+		setStaticCacheHeaders(c, indexPath)
+		c.File(indexPath)
 	})
 	router.StaticFS("/assets", http.Dir(filepath.Join(publicDir, "assets")))
 	router.NoRoute(func(c *gin.Context) {
@@ -44,7 +47,12 @@ func StartHTTPServer(cfg config.Config, publicIP string) (*http.Server, error) {
 			c.Status(http.StatusNotFound)
 			return
 		}
-		c.File(filepath.Join(publicDir, "index.html"))
+		if servePublicFile(c, publicDir) {
+			return
+		}
+		indexPath := filepath.Join(publicDir, "index.html")
+		setStaticCacheHeaders(c, indexPath)
+		c.File(indexPath)
 	})
 
 	addr := net.JoinHostPort(cfg.HTTP.Addr, strconv.Itoa(cfg.HTTP.Port))
@@ -65,6 +73,36 @@ func StartHTTPServer(cfg config.Config, publicIP string) (*http.Server, error) {
 		}
 	}()
 	return server, nil
+}
+
+func servePublicFile(c *gin.Context, publicDir string) bool {
+	cleanPath := path.Clean(c.Request.URL.Path)
+	if cleanPath == "/" || cleanPath == "." {
+		return false
+	}
+
+	relPath := filepath.FromSlash(strings.TrimPrefix(cleanPath, "/"))
+	filePath := filepath.Join(publicDir, relPath)
+	info, err := os.Stat(filePath)
+	if err != nil || info.IsDir() {
+		return false
+	}
+
+	setStaticCacheHeaders(c, filePath)
+	if filepath.Ext(filePath) == ".webmanifest" {
+		c.Header("Content-Type", "application/manifest+json; charset=utf-8")
+	}
+	c.File(filePath)
+	return true
+}
+
+func setStaticCacheHeaders(c *gin.Context, filePath string) {
+	switch filepath.Base(filePath) {
+	case "index.html", "manifest.webmanifest", "registerSW.js", "sw.js", "lead-sw.js", "logo.png", "favicon.ico":
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+	}
 }
 
 func StaticPublicDir() string {

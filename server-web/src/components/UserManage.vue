@@ -4,25 +4,25 @@
       <section class="rounded-2xl bg-white p-4 shadow-soft">
         <div class="mb-3 text-lg font-semibold text-ink">修改密码</div>
         <form
-					class="flex flex-col gap-2"
+					class="flex flex-col gap-2 sm:flex-row"
 					@submit.prevent="resetPassword"
 				>
           <input
 						v-model="newPassword"
-						class="rounded-xl border border-[#f0f0f0] bg-[#f0f0f0] px-4 py-3 outline-none transition focus:border-primary focus:bg-white"
+						class="rounded-xl border border-[#f0f0f0] bg-[#f0f0f0] px-4 py-3 outline-none transition focus:border-primary focus:bg-white sm:min-w-0 sm:flex-1"
 						type="password"
 						autocomplete="new-password"
 						placeholder="请输入新密码"
 				/>
           <input
 						v-model="confirmPassword"
-						class="rounded-xl border border-[#f0f0f0] bg-[#f0f0f0] px-4 py-3 outline-none transition focus:border-primary focus:bg-white"
+						class="rounded-xl border border-[#f0f0f0] bg-[#f0f0f0] px-4 py-3 outline-none transition focus:border-primary focus:bg-white sm:min-w-0 sm:flex-1"
 						type="password"
 						autocomplete="new-password"
 						placeholder="请输入刚才的新密码"
 				/>
           <button
-						class="mt-2 flex w-full items-center justify-center rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-70"
+						class="mt-2 flex w-full items-center justify-center rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-70 sm:mt-0 sm:w-auto sm:px-6"
 						:disabled="loading"
 						type="submit"
 				>

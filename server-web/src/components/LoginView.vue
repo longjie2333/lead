@@ -1,5 +1,5 @@
 <template>
-  <main class="flex min-h-screen items-center justify-center bg-panel px-4">
+  <main class="flex h-screen items-center justify-center bg-panel px-4">
     <form
 				class="flex h-max w-3/4 max-w-sm flex-col gap-3"
 				@submit.prevent="submit"
@@ -36,8 +36,8 @@ import { login } from '@/utils/api'
 const emit = defineEmits(['logged-in'])
 const toastStore = useToastStore()
 
-const username = ref('admin')
-const password = ref('admin')
+const username = ref('')
+const password = ref('')
 const loading = ref(false)
 
 async function submit() {
